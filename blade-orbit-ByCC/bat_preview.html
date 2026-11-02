@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>紫色蝙蝠动画预览</title>
+<style>
+body{margin:0;background:#0d0e14;color:#c7d4e1;font:14px sans-serif;display:flex;flex-direction:column;align-items:center;gap:16px;padding:24px}
+.row{display:flex;gap:32px;flex-wrap:wrap;justify-content:center}
+figure{margin:0;text-align:center}
+canvas{image-rendering:pixelated;image-rendering:crisp-edges;background:#1e2030;border:1px solid #333a4d}
+button,label{background:#2a2f45;color:#f4f4f4;border:1px solid #4a5568;padding:6px 12px;border-radius:4px;font:inherit;cursor:pointer}
+button:focus-visible{outline:2px solid #b46cff}
+</style>
+</head>
+<body>
+<h1 style="font-size:18px;margin:0">紫色蝙蝠 · 48×40 像素</h1>
+<div class="row">
+  <figure><canvas id="idle" width="48" height="40" style="width:288px;height:240px" aria-label="待机动画"></canvas><figcaption>待机 idle（6 帧 / 10fps）</figcaption></figure>
+  <figure><canvas id="dash" width="48" height="40" style="width:288px;height:240px" aria-label="冲刺动画"></canvas><figcaption>冲刺 dash（6 帧 / 14fps）</figcaption></figure>
+</div>
+<div class="row">
+  <label><input type="checkbox" id="pause"> 暂停</label>
+  <button id="step" type="button">下一帧</button>
+  <button id="exIdle" type="button">导出待机精灵表 PNG</button>
+  <button id="exDash" type="button">导出冲刺精灵表 PNG</button>
+</div>
+<figure><canvas id="sheet" style="height:80px" aria-label="精灵表"></canvas><figcaption>精灵表（上：待机，下：冲刺）</figcaption></figure>
+<script src="bat_anim.js"></script>
+<script>
+const views = [
+  { cv: document.getElementById('idle'), frames: BAT_ANIM.idle, fps: 10, t: 0 },
+  { cv: document.getElementById('dash'), frames: BAT_ANIM.dash, fps: 14, t: 0 },
+];
+const pause = document.getElementById('pause');
+function draw() {
+  for (const v of views) {
+    const x = v.cv.getContext('2d');
+    x.clearRect(0, 0, BAT_W, BAT_H);
+    x.drawImage(v.frames[Math.floor(v.t * v.fps) % v.frames.length], 0, 0);
+  }
+}
+let last = performance.now();
+(function loop(now) {
+  const dt = (now - last) / 1000; last = now;
+  if (!pause.checked) for (const v of views) v.t += dt;
+  draw();
+  requestAnimationFrame(loop);
+})(last);
+document.getElementById('step').onclick = () => {
+  pause.checked = true;
+  for (const v of views) v.t = (Math.floor(v.t * v.fps) + 1) / v.fps;
+};
+
+// 精灵表展示与导出
+const si = BAT_ANIM.sheet('idle'), sd = BAT_ANIM.sheet('dash'), sh = document.getElementById('sheet');
+sh.width = Math.max(si.width, sd.width); sh.height = BAT_H * 2;
+sh.style.width = sh.width * 2 + 'px'; sh.style.height = sh.height * 2 + 'px';
+const sx = sh.getContext('2d');
+sx.drawImage(si, 0, 0); sx.drawImage(sd, 0, BAT_H);
+const save = (cv, name) => { const a = document.createElement('a'); a.href = cv.toDataURL('image/png'); a.download = name; a.click(); };
+document.getElementById('exIdle').onclick = () => save(si, 'bat_idle_48x40x6.png');
+document.getElementById('exDash').onclick = () => save(sd, 'bat_dash_48x40x6.png');
+</script>
+</body>
+</html>
