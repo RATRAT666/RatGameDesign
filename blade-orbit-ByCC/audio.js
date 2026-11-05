@@ -46,6 +46,15 @@ const SFX = (() => {
     s.start(t, Math.random() * .4); s.stop(t + dur + .05);
   }
 
+  // 非整数倍泛音做金属共鸣；短包络保持现有游戏的合成音色。
+  function metal(freq, dur, vol, at = 0) {
+    const detune = .98 + Math.random() * .04;
+    [1, 1.47, 2.76].forEach((ratio, i) => {
+      const f = freq * ratio * detune;
+      tone('sine', f, f * .96, dur / (1 + i * .45), vol / (1 + i * 1.4), at);
+    });
+  }
+
   // 音效表：[最小间隔（秒，防止同帧堆叠爆音）, 合成函数]
   const PENTA = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24, 26, 28, 31];
   const DEF = {
@@ -64,6 +73,23 @@ const SFX = (() => {
     thunder: [.06, () => { noise(.4, .35, 6000, 150); tone('sawtooth', 110, 40, .3, .1); }],
     zap: [.06, () => { tone('sawtooth', 1800, 600, .08, .05); noise(.08, .1, 9000, 3000, 0, 'highpass'); }],
     dagger: [.06, () => { noise(.07, .1, 8000, 2500, 0, 'highpass'); tone('triangle', 1400, 700, .06, .04); }],
+    chainCast: [.12, () => {
+      noise(.11, .065, 2800, 750, 0, 'bandpass');
+      [0, .025, .055].forEach((at, i) => metal(710 + i * 135, .045, .04 - i * .008, at));
+    }],
+    chainLink: [.1, () => { noise(.055, .035, 3200, 1400, 0, 'bandpass'); metal(1150, .08, .045); metal(790, .05, .025, .025); }],
+    chainHit: [.055, () => { noise(.025, .085, 3000, 950); metal(650, .16, .095); metal(1320, .065, .03, .012); }],
+    chainTension: [.32, () => { metal(245, .12, .035); noise(.06, .025, 1600, 650, 0, 'bandpass'); }],
+    chainBreak: [.12, () => { noise(.035, .1, 4300, 1300, 0, 'highpass'); metal(1080, .15, .07); metal(530, .11, .045, .025); }],
+    chainRecall: [.18, () => {
+      noise(.14, .035, 1700, 500, 0, 'bandpass');
+      [0, .035, .075].forEach((at, i) => metal(940 - i * 180, .04, .033 - i * .006, at));
+    }],
+    bindOn: [.12, () => {
+      tone('triangle', 340, 130, .24, .065); tone('sine', 358, 141, .27, .04);
+      noise(.16, .035, 1800, 380, 0, 'bandpass'); metal(440, .07, .035, .015);
+    }],
+    bindOff: [.16, () => { tone('sine', 260, 620, .16, .035); noise(.12, .025, 800, 2400, 0, 'bandpass'); }],
     shot: [.07, () => { tone('square', 520, 260, .08, .035); }],
     wave: [.5, () => { for (const at of [0, .6]) { tone('sawtooth', 220, 220, .5, .08, at); tone('sawtooth', 233, 233, .5, .08, at); } }],
     roar: [.5, () => { tone('sawtooth', 95, 38, 1.2, .2); tone('square', 60, 30, 1.2, .1); noise(1.1, .3, 900, 80); }],
@@ -78,7 +104,7 @@ const SFX = (() => {
     if (!ac || muted) return;
     const d = DEF[name]; if (!d) return;
     const now = ac.currentTime;
-    if (now - (last[name] || -9) < d[0]) return;
+    if (now - (last[name] ?? -9) < d[0]) return;
     last[name] = now; d[1](k);
   }
 

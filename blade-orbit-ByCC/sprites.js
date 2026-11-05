@@ -9,6 +9,7 @@ const PAL = {
   'l': '#8ee05a', 'L': '#3f9a3a', 'G': '#1f5a33',
   'v': '#b46cff', 'V': '#6a2fb8',
   'e': '#fff6d0', 'h': '#f2c49b', 'm': '#2a1f2e',
+  'a': '#d7b9ed', 'A': '#b293ce', 'u': '#8566a1', 'U': '#3b2b4d',
 };
 
 const SPR_SRC = {
@@ -191,6 +192,10 @@ const SPR_SRC = {
   quake: ['.kkkkkk.', 'kcc..cck', 'kc.kk.ck', 'k.kwwk.k', 'k.kwwk.k', 'kc.kk.ck', 'kcc..cck', '.kkkkkk.'],
   bloodboom: ['.....kr.', '....k.o.', '..kkkk..', '.kRRRRk.', 'kRprRRRk', 'kRRrRRRk', '.kRRRRk.', '..kkkk..'],
   // 升级卡图标
+  chain: ['..kkk.......', '.kswsk......', 'kg...gk.....', 'kw...dk.....', 'kg...dk.....', '.kgsgkkk....', '..kkkswsk...', '....kg..gk..', '....kw..dk..', '....kg..dk..', '.....kggk...', '......kk....'],
+  chainlink: ['.kkk........', 'ks.sgk......', 'kw..dk......', 'kg..gkk.....', '.kgkyoek....', '..kko..ok...', '...ky..ok...', '....koogkk..', '.....kkswsk.', '......kg..gk', '......kg..dk', '.......kggk.'],
+  chainbind: ['..U......U..', '.UaU....UaU.', '.UuU....UuU.', '..U.UUUU.U..', 'UUUUaaaaUUUU', 'AaUaUuuUaUaA', 'UuUuUUUUuUuU', '..U......U..', 'UUUUaaaaUUUU', 'AaUaUuuUaUaA', 'UuUuUUUUuUuU', '..U......U..'],
+  chainhook: ['..kkk..', '.kswgk.', 'ksk.kgk', 'kgk..kk', '.kgkk..', '..ksk..', '..kyk..'],
   bolt: ['....kkk.', '...kyyk.', '..kyyk..', '.kyyyykk', '.kkkyyk.', '...kyk..', '..kyk...', '..kk....'],
   bomb: ['.....ky.', '....k.o.', '..kkkk..', '.kddddk.', 'kdwddddk', 'kdddddgk', '.kddddk.', '..kkkk..'],
   boot: ['.kkkk...', '.kbbk...', '.kbbk...', '.kbbk...', '.kbbbkk.', 'kbbbbbbk', 'kooooook', '.kkkkkk.'],

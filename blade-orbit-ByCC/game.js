@@ -1,5 +1,6 @@
 'use strict';
-// ================== 剑环 · Blade Orbit —— 第 3 轮：音效 / 稀有度与进化 / 存档 ==================
+// ================== 剑环 · Blade Orbit v0.4.3：锁链与禁锢专属音效 ==================
+const VERSION = '0.4.3';
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const buf = document.createElement('canvas'), g = buf.getContext('2d');
 let W = 400, H = 225, S = 3;
@@ -117,6 +118,9 @@ const ETYPES = {
 
 // ---------- 升级 ----------
 const UPS = [
+  { id: 'chain', name: '锁链', icon: 'chain', max: 5, desc: l => l ? '可同时存在的锁链 +1（各自回收后冷却 1 秒）' : '自动发射锁链，命中造成伤害并拉敌入剑环；过长断裂', apply: () => { } },
+  { id: 'chainlink', name: '铁索连环', icon: 'chainlink', max: 2, req: () => lvOf('chain') > 0, desc: l => l ? '每条锁链再增加 1 次串联（最多额外 2 次）' : '锁链命中后，飞向目标附近另一名敌人并串联拉扯', apply: () => { } },
+  { id: 'chainbind', name: '禁锢锁链', icon: 'chainbind', max: 1, req: () => lvOf('chain') > 0, desc: () => '锁链命中禁锢 3 秒，仍可被推拉；重复命中递减，10 秒未施加重置', apply: () => { } },
   { id: 'blade', name: '再添一剑', icon: 'sword', max: 6, desc: () => '环绕之剑 +1', apply: () => G.sw.n++ },
   { id: 'sharp', name: '淬火锋刃', icon: 'flame', max: 5, desc: () => '所有伤害 +30%', apply: () => G.sw.dmg *= 1.3 },
   { id: 'spin', name: '旋风', icon: 'swirl', max: 5, desc: () => '剑的旋转速度 +25%', apply: () => G.sw.spin *= 1.25 },
@@ -166,7 +170,7 @@ function newGame(state = 'play') {
     p: { x: 0, y: 0, vx: 0, vy: 0, hp: 100, maxHp: 100, spd: 64, inv: 0, face: 1, walk: 0, magnet: 30 },
     sw: { n: 2, r: 24, spin: 3.4, dmg: 7, size: 1, ang: 0, crit: .05, kb: 70 },
     lv: 1, xp: 0, xpNext: 6, pendingLv: 0, toLevel: -1, choices: null, cardRects: [], cardT: 0,
-    enemies: [], gems: [], parts: [], nums: [], projs: [], fx: [], booms: [],
+    enemies: [], gems: [], parts: [], nums: [], projs: [], fx: [], booms: [], chains: [],
     kills: 0, spawnT: 0, waveIdx: 0, up: {}, shake: 0, freeze: 0, hurtFlash: 0, flash: 0,
     dagT: 1, thT: 1, novaT: 2, cam: { x: 0, y: 0 }, banner: null,
     eps: [], boss: null, bossIn: 0, bossDead: 0,
@@ -214,7 +218,7 @@ function addNum(x, y, txt, col, big) { G.nums.push({ x: x + rand(-3, 3), y, txt:
 function shake(v) { G.shake = Math.max(G.shake, v); }
 
 // ---------- 伤害与击杀 ----------
-function hurt(e, dmg, kx, ky, kb, canCrit, silent) {
+function hurt(e, dmg, kx, ky, kb, canCrit, silent, sound) {
   if (e.dead) return;
   const crit = canCrit && Math.random() < G.sw.crit;
   if (crit) dmg *= 2.5;
@@ -223,7 +227,7 @@ function hurt(e, dmg, kx, ky, kb, canCrit, silent) {
   e.kvx += kx * kb * e.type.kbm; e.kvy += ky * kb * e.type.kbm;
   if (lvOf('knock')) e.slow = .5 + lvOf('knock') * .3;
   addNum(e.x, e.y - 8, dmg, crit ? '#ffd65a' : silent ? '#ff9a5a' : '#ffffff', crit);
-  if (!silent) SFX.play(crit ? 'crit' : 'hit');
+  if (!silent) SFX.play(sound || (crit ? 'crit' : 'hit'));
   for (let i = 0; i < (crit ? 6 : silent ? 1 : 3); i++) {
     const a = Math.atan2(ky, kx) + rand(-.7, .7), s = rand(40, 110);
     G.parts.push({ x: e.x, y: e.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: .25, max: .25, col: crit ? '#ffd65a' : '#ffffff', size: 1, grav: 0 });
@@ -519,6 +523,99 @@ function chainZap(from, n, dmg) {
   }
   if (hit.size > 1) SFX.play('zap');
 }
+// ---------- 锁链：每个槽位独立飞出、持有、回收、冷却 ----------
+const CHAIN = { reach: 112, hop: 72, maxLength: 160, speed: 260, retractSpeed: 340, cooldown: 1 };
+function chainOccupied(e) {
+  return G.chains.some(c => c.nodes.includes(e) || (c.tip && c.tip.target === e));
+}
+function chainTarget(from, range) {
+  let best = null, bd = range;
+  for (const e of G.enemies) {
+    if (e.dead || chainOccupied(e)) continue;
+    const d = Math.hypot(e.x - from.x, e.y - from.y);
+    if (d <= bd) { best = e; bd = d; }
+  }
+  return best;
+}
+function bindEnemy(e) {
+  if (G.t - (e.bindLast ?? -Infinity) >= 10) e.bindHits = 0;
+  const duration = 3 / (1 + (e.bindHits || 0) * .65);
+  e.bindHits = (e.bindHits || 0) + 1; e.bindLast = G.t;
+  e.bindUntil = Math.max(e.bindUntil || 0, G.t + duration);
+  e.bindSoundActive = true; SFX.play('bindOn');
+  part(e.x, e.y - 3, '#b46cff', 6, 35, .3, 1);
+}
+function retractChain(c) {
+  if (c.phase === 'retract' || c.phase === 'cooldown') return;
+  c.returnPath = c.nodes.map(e => ({ x: e.x, y: e.y }));
+  if (c.tip) c.returnPath.push({ x: c.tip.x, y: c.tip.y });
+  c.nodes = []; c.tip = null; c.phase = 'retract';
+  SFX.play('chainRecall');
+}
+function chainPull(e, dx, dy, distance, dt) {
+  // kbm 是现有敌人体重的倒数；禁锢只抑制自主移动，不抑制外力。
+  const ring = lvOf('ring2') ? G.sw.r * 1.75 : G.sw.r;
+  if (Math.hypot(e.x - G.p.x, e.y - G.p.y) <= ring) return false;
+  const force = Math.min(1400, Math.max(0, distance - 8) * 18) * e.type.kbm;
+  e.kvx += dx * force * dt; e.kvy += dy * force * dt;
+  return force > 0;
+}
+function updateChains(dt) {
+  while (G.chains.length < lvOf('chain')) G.chains.push({ nodes: [], tip: null, phase: 'ready', cooldown: 0 });
+  for (const c of G.chains) {
+    if (c.phase === 'cooldown') {
+      c.cooldown = Math.max(0, c.cooldown - dt);
+      if (c.cooldown > 0) continue;
+      c.phase = 'ready';
+    }
+    if (c.phase === 'retract') {
+      // 沿原来的连接路径收回，完全消失之后才开始独立的一秒冷却。
+      let travel = CHAIN.retractSpeed * dt;
+      while (c.returnPath.length && travel > 0) {
+        const tip = c.returnPath[c.returnPath.length - 1];
+        const dest = c.returnPath.length > 1 ? c.returnPath[c.returnPath.length - 2] : G.p;
+        const dx = dest.x - tip.x, dy = dest.y - tip.y, d = Math.hypot(dx, dy);
+        if (d <= travel) { travel -= d; c.returnPath.pop(); }
+        else { tip.x += dx / d * travel; tip.y += dy / d * travel; travel = 0; }
+      }
+      if (!c.returnPath.length) { c.phase = 'cooldown'; c.cooldown = CHAIN.cooldown; }
+      continue;
+    }
+    if (c.nodes.some(e => e.dead)) { retractChain(c); continue; }
+    let anchor = G.p, broken = false, pulling = false;
+    for (const e of c.nodes) {
+      const dx = anchor.x - e.x, dy = anchor.y - e.y, d = Math.hypot(dx, dy);
+      if (d > CHAIN.maxLength) { broken = true; break; }
+      if (chainPull(e, dx / (d || 1), dy / (d || 1), d, dt)) pulling = true;
+      if (anchor !== G.p && chainPull(anchor, -dx / (d || 1), -dy / (d || 1), d, dt)) pulling = true;
+      anchor = e;
+    }
+    if (broken || (c.tip && (c.tip.target.dead || Math.hypot(c.tip.target.x - anchor.x, c.tip.target.y - anchor.y) > CHAIN.maxLength))) {
+      const stretched = broken || (c.tip && !c.tip.target.dead);
+      if (stretched) SFX.play('chainBreak');
+      part(anchor.x, anchor.y, '#c7d4e1', 5, 50, .25, 1); retractChain(c); continue;
+    }
+    if (pulling && G.t >= (c.nextTensionSound || 0)) {
+      SFX.play('chainTension'); c.nextTensionSound = G.t + .65;
+    }
+    if (!c.tip && c.nodes.length < 1 + lvOf('chainlink')) {
+      const target = chainTarget(anchor, c.nodes.length ? CHAIN.hop : CHAIN.reach);
+      if (target) {
+        SFX.play(c.nodes.length ? 'chainLink' : 'chainCast');
+        c.tip = { x: anchor.x, y: anchor.y, target }; c.phase = 'fly';
+      }
+    }
+    if (!c.tip) continue;
+    const tip = c.tip, e = tip.target, dx = e.x - tip.x, dy = e.y - tip.y, d = Math.hypot(dx, dy);
+    if (d <= CHAIN.speed * dt + e.type.r) {
+      c.nodes.push(e); c.tip = null; c.phase = 'hold';
+      hurt(e, G.sw.dmg * 1.15, 0, 0, 0, false, false, 'chainHit');
+      if (!e.dead && lvOf('chainbind')) bindEnemy(e);
+      part(e.x, e.y - 3, '#c7d4e1', 4, 45, .2, 1);
+      if (e.dead) retractChain(c);
+    } else { tip.x += dx / d * CHAIN.speed * dt; tip.y += dy / d * CHAIN.speed * dt; }
+  }
+}
 // ---------- 更新 ----------
 function update(dt) {
   G.real += dt; G.stateT += dt;
@@ -592,6 +689,7 @@ function update(dt) {
   G.quakes = G.quakes.filter(qk => qk.t > 0);
 
   spawner(dt);
+  updateChains(dt);
   if (G.bossIn > 0) G.bossIn -= dt;
 
   // 敌人
@@ -610,8 +708,12 @@ function update(dt) {
       if (Math.random() < .3) G.parts.push({ x: e.x + rand(-3, 3), y: e.y - rand(0, 4), vx: 0, vy: -20, life: .3, max: .3, col: Math.random() < .5 ? '#ffd65a' : '#ff8a3a', size: 1, grav: 0 });
       if (e.burnT <= 0) { e.burnT = .4; hurt(e, sw.dmg * .35, 0, 0, 0, false, true); if (e.dead) continue; }
     }
+    if (e.bindSoundActive && G.t >= e.bindUntil) {
+      e.bindSoundActive = false; SFX.play('bindOff');
+    }
     const dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy) || 1;
     let spd = e.type.spd * (e.slow > 0 ? .45 : 1);
+    if (e.bindUntil > G.t) spd = 0;
     if (e.type.boss && G.bossIn > 0) spd = 0;
     if (e.stun > 0) { e.stun -= dt; spd = 0; }
     let dir = 1;
@@ -766,6 +868,86 @@ function shadow(x, y, w) {
   g.fillRect(Math.round(x - w), Math.round(y - 1), w * 2, 2);
   g.fillRect(Math.round(x - w + 1), Math.round(y - 2), w * 2 - 2, 4);
 }
+// 链节是带真孔洞的正面椭圆环与侧面窄环，交替相扣。
+const CHAIN_ART = {
+  face: ['..kkkkkkk..', '.kgswwwsgk.', 'kg.......gk', 'kw.......dk', 'kg.......dk', '.kgdddddgk.', '..kkkkkkk..'],
+  edge: ['.kkkkkkk.', 'kgswwwsgk', '.kdddddk.'],
+  thinFace: ['.gswg.', 'kg..dk', 'ks..dk', '.gddg.'],
+  thinEdge: ['.kgk.', 'gsdgk'],
+  small: ['.gsg.', 'gs.dg', '.gdg.'],
+};
+const CHAIN_STAMPS = new Map();
+const BIND_PAL = { k: '#3b2b4d', w: '#eddcfa', s: '#d7b9ed', g: '#b293ce', d: '#8566a1' };
+function chainPixels(rows, x, y, angle, dim = false, magic = false) {
+  const direction = (Math.round(angle / TAU * 32) + 32) % 32;
+  const key = rows.join('') + ':' + direction + ':' + dim + ':' + magic;
+  let stamp = CHAIN_STAMPS.get(key);
+  if (!stamp) {
+    stamp = document.createElement('canvas'); stamp.width = stamp.height = 15;
+    const c = stamp.getContext('2d'), ca = Math.cos(direction / 32 * TAU), sa = Math.sin(direction / 32 * TAU);
+    const hw = (rows[0].length - 1) / 2, hh = (rows.length - 1) / 2;
+    // 逆向采样不会在斜环上留下前向投影的像素裂缝；缓存 32 个方向。
+    for (let py = -7; py <= 7; py++) for (let px = -7; px <= 7; px++) {
+      const i = Math.round(px * ca + py * sa + hw), j = Math.round(-px * sa + py * ca + hh);
+      const ch = rows[j]?.[i]; if (!ch || ch === '.') continue;
+      let col = PAL[ch];
+      if (dim) col = ch === 'w' || ch === 's' ? PAL.g : ch === 'g' ? PAL.d : PAL.k;
+      if (magic) col = BIND_PAL[ch] || col;
+      c.fillStyle = col; c.fillRect(px + 7, py + 7, 1, 1);
+    }
+    CHAIN_STAMPS.set(key, stamp);
+  }
+  g.drawImage(stamp, Math.round(x) - 7, Math.round(y) - 7);
+}
+function drawChainSegment(a, b, retracting = false) {
+  const dx = b.x - a.x, dy = b.y - a.y, length = Math.hypot(dx, dy);
+  if (length < 2) return;
+  const n = Math.max(1, Math.round(length / 3)), sag = Math.min(3, length * .025);
+  const point = i => {
+    const t = (i + .5) / n;
+    return { x: a.x + dx * t, y: a.y + dy * t - 3 + Math.sin(t * Math.PI) * sag,
+      angle: Math.atan2(dy + Math.cos(t * Math.PI) * Math.PI * sag, dx) };
+  };
+  // 先画窄环，后画空心宽环，交叠处形成穿过孔洞的连接。
+  for (const parity of [1, 0]) for (let i = parity; i < n; i += 2) {
+    const p = point(i);
+    chainPixels(parity ? CHAIN_ART.thinEdge : CHAIN_ART.thinFace, p.x, p.y, p.angle + (parity ? -.2 : .2), retracting);
+  }
+}
+function drawChains() {
+  for (const c of G.chains) {
+    let anchor = G.p;
+    const points = c.phase === 'retract' ? c.returnPath : c.nodes;
+    for (const e of points) { drawChainSegment(anchor, e, c.phase === 'retract'); anchor = e; }
+    if (c.tip) {
+      drawChainSegment(anchor, c.tip);
+      spr('chainhook', c.tip.x, c.tip.y, false, false, .5, .5);
+    }
+    for (const e of c.nodes) {
+      if (e.dead) continue;
+      chainPixels(CHAIN_ART.thinFace, e.x, e.y - 2, Math.PI / 2);
+    }
+  }
+}
+function drawBinding(e) {
+  const small = e.type.wobble || e.type.ranged || e.type.spr[0] === 'slime';
+  const fly = e.type.wobble ? -4 + Math.sin(G.t * 8 + e.seed) * 1.5 : 0;
+  const x = Math.round(e.x), y = Math.round(e.y + (small ? e.type.r + fly - 2 : 0)), r = Math.max(4, e.type.r);
+  const close = Math.max(0, 1 - (G.t - e.bindLast) / .18), spread = close * 3;
+  // 横过胸腹的两道实体锁链，边缘暗段说明锁链绕向背后。
+  for (const offset of small ? [0] : [-1, 3]) {
+    for (let dx = -r; dx <= r; dx += 3) {
+      chainPixels(CHAIN_ART.small, x + dx * (1 + spread / r), y + offset, 0, false, true);
+    }
+    for (const sign of [-1, 1]) {
+      g.fillStyle = BIND_PAL.d; g.fillRect(Math.round(x + sign * (r + spread + 1)), y + offset, 1, 2);
+    }
+  }
+  if (close > 0) {
+    g.fillStyle = BIND_PAL.s;
+    for (const sign of [-1, 1]) { g.fillRect(x + sign * (r + 3), y - 7, 1, 3); g.fillRect(x + sign * (r + 4), y - 5, 2, 1); }
+  }
+}
 function render() {
   g.imageSmoothingEnabled = false; ctx.imageSmoothingEnabled = false;
   const p = G.p, sw = G.sw;
@@ -793,6 +975,7 @@ function render() {
   }
 
   // 实体（按 y 排序）
+  drawChains();
   const list = G.enemies.map(e => ({ y: e.y, e }));
   if (G.state !== 'over') list.push({ y: p.y, player: true });
   list.sort((a, b) => a.y - b.y);
@@ -817,9 +1000,11 @@ function render() {
         }
       }
       if (e.hp < e.maxHp && T.hp >= 40) {
-        g.fillStyle = '#1a1423'; g.fillRect(Math.round(e.x - 6), Math.round(e.y - 12), 12, 2);
-        g.fillStyle = '#e8403f'; g.fillRect(Math.round(e.x - 6), Math.round(e.y - 12), Math.round(12 * e.hp / e.maxHp), 2);
+        const hy = e.y - Math.max(12, T.r + 4);
+        g.fillStyle = '#1a1423'; g.fillRect(Math.round(e.x - 6), Math.round(hy), 12, 2);
+        g.fillStyle = '#e8403f'; g.fillRect(Math.round(e.x - 6), Math.round(hy), Math.round(12 * e.hp / e.maxHp), 2);
       }
+      if (e.bindUntil > G.t) drawBinding(e);
     }
   }
 
@@ -1076,6 +1261,7 @@ function drawTitle() {
   const bob = Math.sin(G.real * 2) * 2 * S;
   cnText('剑 环', CW / 2, CH * .3 + bob, 22 * S, '#ffd65a');
   cnText('BLADE ORBIT', CW / 2, CH * .3 + 16 * S + bob, 6 * S, '#5ad1ff');
+  cnText(`v${VERSION} · 锁链之章`, CW / 2, CH * .3 + 27 * S + bob, 4 * S, '#c7d4e1');
   if (Math.floor(G.real * 2) % 2 === 0) cnText('按任意键 / 点击 开始', CW / 2, CH * .72, 6 * S, '#ffffff');
   cnText('WASD / 方向键 移动（或按住鼠标）  ·  剑会自动旋转斩敌  ·  撑到首领降临并击败它', CW / 2, CH * .72 + 12 * S, 4 * S, '#7b8ea3');
   cnText('P 暂停  ·  M 静音  ·  升级时 R 重抽', CW / 2, CH * .72 + 19 * S, 4 * S, '#7b8ea3');
