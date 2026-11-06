@@ -1,6 +1,6 @@
 'use strict';
-// ================== 剑环 · Blade Orbit v0.4.3：锁链与禁锢专属音效 ==================
-const VERSION = '0.4.3';
+// ================== 剑环 · Blade Orbit v0.4.4：锁链节奏与推拉优化 ==================
+const VERSION = '0.4.4';
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const buf = document.createElement('canvas'), g = buf.getContext('2d');
 let W = 400, H = 225, S = 3;
@@ -118,7 +118,7 @@ const ETYPES = {
 
 // ---------- 升级 ----------
 const UPS = [
-  { id: 'chain', name: '锁链', icon: 'chain', max: 5, desc: l => l ? '可同时存在的锁链 +1（各自回收后冷却 1 秒）' : '自动发射锁链，命中造成伤害并拉敌入剑环；过长断裂', apply: () => { } },
+  { id: 'chain', name: '锁链', icon: 'chain', max: 5, desc: l => l ? '可同时存在的锁链 +1，命中伤害 +20% 基础值' : '自动发射锁链，命中造成伤害；环外拉近，穿过内环则推开', apply: () => { } },
   { id: 'chainlink', name: '铁索连环', icon: 'chainlink', max: 2, req: () => lvOf('chain') > 0, desc: l => l ? '每条锁链再增加 1 次串联（最多额外 2 次）' : '锁链命中后，飞向目标附近另一名敌人并串联拉扯', apply: () => { } },
   { id: 'chainbind', name: '禁锢锁链', icon: 'chainbind', max: 1, req: () => lvOf('chain') > 0, desc: () => '锁链命中禁锢 3 秒，仍可被推拉；重复命中递减，10 秒未施加重置', apply: () => { } },
   { id: 'blade', name: '再添一剑', icon: 'sword', max: 6, desc: () => '环绕之剑 +1', apply: () => G.sw.n++ },
@@ -170,7 +170,7 @@ function newGame(state = 'play') {
     p: { x: 0, y: 0, vx: 0, vy: 0, hp: 100, maxHp: 100, spd: 64, inv: 0, face: 1, walk: 0, magnet: 30 },
     sw: { n: 2, r: 24, spin: 3.4, dmg: 7, size: 1, ang: 0, crit: .05, kb: 70 },
     lv: 1, xp: 0, xpNext: 6, pendingLv: 0, toLevel: -1, choices: null, cardRects: [], cardT: 0,
-    enemies: [], gems: [], parts: [], nums: [], projs: [], fx: [], booms: [], chains: [],
+    enemies: [], gems: [], parts: [], nums: [], projs: [], fx: [], booms: [], chains: [], nextChainCast: 0,
     kills: 0, spawnT: 0, waveIdx: 0, up: {}, shake: 0, freeze: 0, hurtFlash: 0, flash: 0,
     dagT: 1, thT: 1, novaT: 2, cam: { x: 0, y: 0 }, banner: null,
     eps: [], boss: null, bossIn: 0, bossDead: 0,
@@ -524,7 +524,7 @@ function chainZap(from, n, dmg) {
   if (hit.size > 1) SFX.play('zap');
 }
 // ---------- 锁链：每个槽位独立飞出、持有、回收、冷却 ----------
-const CHAIN = { reach: 112, hop: 72, maxLength: 160, speed: 260, retractSpeed: 340, cooldown: 1 };
+const CHAIN = { reach: 112, hop: 72, maxLength: 160, speed: 260, retractSpeed: 1020, cooldown: .1, castInterval: .1, forceMultiplier: 1.5 };
 function chainOccupied(e) {
   return G.chains.some(c => c.nodes.includes(e) || (c.tip && c.tip.target === e));
 }
@@ -552,16 +552,29 @@ function retractChain(c) {
   c.nodes = []; c.tip = null; c.phase = 'retract';
   SFX.play('chainRecall');
 }
-function chainPull(e, dx, dy, distance, dt) {
+function chainPull(e, dx, dy, distance, dt, repel = true) {
   // kbm 是现有敌人体重的倒数；禁锢只抑制自主移动，不抑制外力。
-  const ring = lvOf('ring2') ? G.sw.r * 1.75 : G.sw.r;
-  if (Math.hypot(e.x - G.p.x, e.y - G.p.y) <= ring) return false;
-  const force = Math.min(1400, Math.max(0, distance - 8) * 18) * e.type.kbm;
+  const { p, sw } = G;
+  const fromPlayerX = e.x - p.x, fromPlayerY = e.y - p.y;
+  const radius = Math.hypot(fromPlayerX, fromPlayerY);
+  const outerRing = lvOf('ring2') ? sw.r * 1.75 : sw.r;
+  // 与刀刃碰撞判定使用相同的端点和碰撞宽度。
+  const innerEdge = sw.r - 5 * sw.size - e.type.r;
+  const outerEdge = outerRing + 9 * sw.size + e.type.r;
+  if (repel && radius < innerEdge) {
+    const force = Math.min(1400, (sw.r - radius) * 18) * CHAIN.forceMultiplier * e.type.kbm;
+    e.kvx += (radius ? fromPlayerX / radius : p.face) * force * dt;
+    e.kvy += (radius ? fromPlayerY / radius : 0) * force * dt;
+    return false; // 推开时不播放锁链拉紧声。
+  }
+  if (radius <= outerEdge) return false;
+  const force = Math.min(1400, Math.max(0, distance - 8) * 18) * CHAIN.forceMultiplier * e.type.kbm;
   e.kvx += dx * force * dt; e.kvy += dy * force * dt;
   return force > 0;
 }
 function updateChains(dt) {
-  while (G.chains.length < lvOf('chain')) G.chains.push({ nodes: [], tip: null, phase: 'ready', cooldown: 0 });
+  const level = lvOf('chain');
+  while (G.chains.length < level) G.chains.push({ nodes: [], tip: null, phase: 'ready', cooldown: 0 });
   for (const c of G.chains) {
     if (c.phase === 'cooldown') {
       c.cooldown = Math.max(0, c.cooldown - dt);
@@ -569,7 +582,7 @@ function updateChains(dt) {
       c.phase = 'ready';
     }
     if (c.phase === 'retract') {
-      // 沿原来的连接路径收回，完全消失之后才开始独立的一秒冷却。
+      // 沿原来的连接路径收回，完全消失后才开始独立冷却。
       let travel = CHAIN.retractSpeed * dt;
       while (c.returnPath.length && travel > 0) {
         const tip = c.returnPath[c.returnPath.length - 1];
@@ -587,7 +600,7 @@ function updateChains(dt) {
       const dx = anchor.x - e.x, dy = anchor.y - e.y, d = Math.hypot(dx, dy);
       if (d > CHAIN.maxLength) { broken = true; break; }
       if (chainPull(e, dx / (d || 1), dy / (d || 1), d, dt)) pulling = true;
-      if (anchor !== G.p && chainPull(anchor, -dx / (d || 1), -dy / (d || 1), d, dt)) pulling = true;
+      if (anchor !== G.p && chainPull(anchor, -dx / (d || 1), -dy / (d || 1), d, dt, false)) pulling = true;
       anchor = e;
     }
     if (broken || (c.tip && (c.tip.target.dead || Math.hypot(c.tip.target.x - anchor.x, c.tip.target.y - anchor.y) > CHAIN.maxLength))) {
@@ -598,10 +611,13 @@ function updateChains(dt) {
     if (pulling && G.t >= (c.nextTensionSound || 0)) {
       SFX.play('chainTension'); c.nextTensionSound = G.t + .65;
     }
-    if (!c.tip && c.nodes.length < 1 + lvOf('chainlink')) {
+    const linking = c.nodes.length > 0;
+    const canCast = G.t + 1e-9 >= G.nextChainCast;
+    if (!c.tip && c.nodes.length < 1 + lvOf('chainlink') && (linking || canCast)) {
       const target = chainTarget(anchor, c.nodes.length ? CHAIN.hop : CHAIN.reach);
       if (target) {
-        SFX.play(c.nodes.length ? 'chainLink' : 'chainCast');
+        if (!linking) G.nextChainCast = G.t + CHAIN.castInterval;
+        SFX.play(linking ? 'chainLink' : 'chainCast');
         c.tip = { x: anchor.x, y: anchor.y, target }; c.phase = 'fly';
       }
     }
@@ -609,7 +625,7 @@ function updateChains(dt) {
     const tip = c.tip, e = tip.target, dx = e.x - tip.x, dy = e.y - tip.y, d = Math.hypot(dx, dy);
     if (d <= CHAIN.speed * dt + e.type.r) {
       c.nodes.push(e); c.tip = null; c.phase = 'hold';
-      hurt(e, G.sw.dmg * 1.15, 0, 0, 0, false, false, 'chainHit');
+      hurt(e, G.sw.dmg * 1.15 * (1 + .2 * (level - 1)), 0, 0, 0, false, false, 'chainHit');
       if (!e.dead && lvOf('chainbind')) bindEnemy(e);
       part(e.x, e.y - 3, '#c7d4e1', 4, 45, .2, 1);
       if (e.dead) retractChain(c);

@@ -16,18 +16,24 @@ test('upgrade prerequisites and caps govern the card pool', () => {
   assert(!g.rollChoices().some(c => ['chain','chainlink','chainbind'].includes(c.u.id)));
 });
 
-test('slots reserve targets in flight and cool independently after retraction', () => {
+test('new chains share a 0.1 second cast interval and cool independently after fast retraction', () => {
   const g = setup(); g.G.up.chain = 2;
   const a = enemy(g, 90), b = enemy(g, 100);
   g.updateChains(.01);
   const [first, second] = g.G.chains;
-  assert.equal(first.tip.target, a); assert.equal(second.tip.target, b);
-  assert(g.chainOccupied(a)); assert.notEqual(first.tip.target, second.tip.target);
+  assert.equal(first.tip.target, a); assert.equal(second.tip, null);
+  g.G.t = .099; g.updateChains(.01); assert.equal(second.tip, null);
+  g.G.t = .1; g.updateChains(.01); assert.equal(second.tip.target, b);
+  assert(g.chainOccupied(a)); assert(g.chainOccupied(b));
+
+  g.updateChains(.4);
   g.retractChain(first); assert(!g.chainOccupied(a));
-  g.updateChains(1); assert.equal(first.phase, 'cooldown'); assert.equal(first.cooldown, 1);
+  g.updateChains(.09); assert.equal(first.phase, 'cooldown'); assert.equal(first.cooldown, .1);
   assert.equal(second.phase, 'hold');
-  g.updateChains(.5); assert.equal(first.phase, 'cooldown'); assert.equal(first.cooldown, .5);
-  g.updateChains(.5); assert.equal(first.phase, 'hold'); assert.equal(first.nodes[0], a);
+  g.G.t += .05; g.updateChains(.05);
+  assert.equal(first.phase, 'cooldown'); assert.equal(first.cooldown, .05);
+  g.G.t += .05; g.updateChains(.05);
+  assert.equal(first.tip.target, a);
 });
 
 test('two link upgrades cap a chain at three distinct enemies', () => {
@@ -45,12 +51,34 @@ test('death and excessive length trigger retraction and release occupancy', () =
   far.x = g.CHAIN.maxLength + 1; g.updateChains(.01); assert.equal(g.G.chains[0].phase, 'retract');
 });
 
-test('pull respects weight and stops inside the sword ring', () => {
+test('chain pulls outside blade reach and repels radially inside the inner edge', () => {
   const g = setup(); const light = enemy(g, 80, 'bat'), heavy = enemy(g, 80, 'boss');
   g.chainPull(light, -1, 0, 80, .1); g.chainPull(heavy, -1, 0, 80, .1);
+  assert.equal(light.kvx, -(80 - 8) * 18 * 1.5 * light.type.kbm * .1);
   assert(Math.abs(light.kvx) > Math.abs(heavy.kvx));
-  light.x = g.G.sw.r; light.kvx = 0; g.chainPull(light, -1, 0, 80, .1); assert.equal(light.kvx, 0);
-  g.G.up.ring2 = 1; light.x = g.G.sw.r * 1.5; g.chainPull(light, -1, 0, 80, .1); assert.equal(light.kvx, 0);
+  light.x = g.G.sw.r + 2; light.kvx = 0;
+  g.chainPull(light, -1, 0, 80, .1); assert.equal(light.kvx, 0);
+  g.G.up.ring2 = 1; light.x = g.G.sw.r * 1.75 + 2;
+  g.chainPull(light, -1, 0, 80, .1); assert.equal(light.kvx, 0);
+  light.x = 8;
+  g.chainPull(light, 0, -1, 80, .1);
+  assert.equal(light.kvx, (g.G.sw.r - 8) * 18 * 1.5 * light.type.kbm * .1);
+  assert.equal(light.kvy, 0);
+});
+
+test('each chain level adds 20% of base hit damage, including linked hits', () => {
+  const g = setup();
+  g.G.sw.dmg = 100; Object.assign(g.G.up, {chain: 5, chainlink: 1});
+  const first = enemy(g, 60), second = enemy(g, 118);
+  first.hp = second.hp = 1000;
+  const random = Math.random;
+  try {
+    Math.random = () => .5;
+    g.updateChains(.3);
+    g.updateChains(.3);
+    assert.equal(first.hp, 793);
+    assert.equal(second.hp, 793);
+  } finally { Math.random = random; }
 });
 
 test('binding duration diminishes and resets after ten seconds without a hit', () => {

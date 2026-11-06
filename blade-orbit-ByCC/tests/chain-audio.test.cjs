@@ -50,10 +50,11 @@ test('recall plays once and excessive length also produces a break sound', () =>
 test('tension sounds on first pull and no more than once per slot per 0.65 seconds', () => {
   const g = setup(); g.G.up.chain = 2;
   enemy(g, 70); enemy(g, 90); g.updateChains(.4);
-  g.audioEvents.length = 0; g.updateChains(.01);
-  assert.equal(count(g, 'chainTension'), 2);
-  g.G.t += .64; g.updateChains(.01); assert.equal(count(g, 'chainTension'), 2);
-  g.G.t += .02; g.updateChains(.01); assert.equal(count(g, 'chainTension'), 4);
+  g.audioEvents.length = 0;
+  g.G.t = .1; g.updateChains(.4); assert.equal(count(g, 'chainTension'), 1);
+  g.G.t = .11; g.updateChains(.01); assert.equal(count(g, 'chainTension'), 2);
+  g.G.t = .74; g.updateChains(.01); assert.equal(count(g, 'chainTension'), 2);
+  g.G.t = .77; g.updateChains(.01); assert.equal(count(g, 'chainTension'), 4);
 });
 
 test('enemies inside the sword ring produce no tension sound', () => {
