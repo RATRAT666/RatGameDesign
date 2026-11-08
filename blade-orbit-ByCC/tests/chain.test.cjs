@@ -12,7 +12,7 @@ test('upgrade prerequisites and caps govern the card pool', () => {
   for (const id of ['chainlink','chainbind']) assert(g.UPS.find(u => u.id === id).req());
   const seen = new Set(); for (let i = 0; i < 100; i++) for (const c of g.rollChoices()) seen.add(c.u.id);
   for (const id of ['chain','chainlink','chainbind']) assert(seen.has(id));
-  Object.assign(g.G.up, { chain: 5, chainlink: 2, chainbind: 1 });
+  Object.assign(g.G.up, { chain: 5, chainlink: 3, chainbind: 1 });
   assert(!g.rollChoices().some(c => ['chain','chainlink','chainbind'].includes(c.u.id)));
 });
 
@@ -36,11 +36,11 @@ test('new chains share a 0.1 second cast interval and cool independently after f
   assert.equal(first.tip.target, a);
 });
 
-test('two link upgrades cap a chain at three distinct enemies', () => {
-  const g = setup(); Object.assign(g.G.up, {chain: 1, chainlink: 2});
-  [60, 80, 100, 120].forEach(x => enemy(g, x));
+test('three link upgrades cap a chain at four distinct enemies', () => {
+  const g = setup(); Object.assign(g.G.up, {chain: 1, chainlink: 3});
+  [60, 80, 100, 120, 140].forEach(x => enemy(g, x));
   for (let i=0; i<10; i++) g.updateChains(.2);
-  const c = g.G.chains[0]; assert.equal(c.nodes.length, 3); assert.equal(new Set(c.nodes).size, 3); assert.equal(c.tip, null);
+  const c = g.G.chains[0]; assert.equal(c.nodes.length, 4); assert.equal(new Set(c.nodes).size, 4); assert.equal(c.tip, null);
 });
 
 test('death and excessive length trigger retraction and release occupancy', () => {
@@ -76,8 +76,8 @@ test('each chain level adds 20% of base hit damage, including linked hits', () =
     Math.random = () => .5;
     g.updateChains(.3);
     g.updateChains(.3);
-    assert.equal(first.hp, 793);
-    assert.equal(second.hp, 793);
+    assert.equal(first.hp, 834);
+    assert.equal(second.hp, 834);
   } finally { Math.random = random; }
 });
 

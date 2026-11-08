@@ -1,6 +1,10 @@
 'use strict';
-// ================== 剑环 · Blade Orbit v0.4.4：锁链节奏与推拉优化 ==================
-const VERSION = '0.4.4';
+// ================== 剑环 · Blade Orbit v0.4.6：深渊节拍 ==================
+const VERSION = '0.4.10';
+const DIFFICULTIES = {
+  normal: { playerDamage: .8, mobHp: .90, mobDamage: .92, spawnInterval: 1.10, waveSize: .90, bossHp: 1, bossSpeed: 1, bossDamage: 1, bossBeats: 0 },
+  hard: { playerDamage: 1, mobHp: 1, mobDamage: 1, spawnInterval: 1, waveSize: 1, bossHp: 1.15, bossSpeed: 1.15, bossDamage: 1.2, bossBeats: -1 },
+};
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const buf = document.createElement('canvas'), g = buf.getContext('2d');
 let W = 400, H = 225, S = 3;
@@ -13,7 +17,9 @@ function resize() {
 addEventListener('resize', resize); resize();
 
 const TAU = Math.PI * 2;
-const BOSS_T = 150; // 2:30 首领降临，击败首领即通关（整局约 3 分钟）
+const ELITE_T = 88;
+const BOSS_T = 180;
+const WAVES = [32, 68, 136];
 const TS = 1.6;     // 难度时间倍率：压缩原 4 分钟的难度曲线
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -31,7 +37,12 @@ function distSeg(px, py, x1, y1, x2, y2) {
 // ---------- 输入 ----------
 const keys = {};
 const mouse = { x: 0, y: 0, down: false };
-addEventListener('keydown', e => { SFX.init(); if (!e.repeat) onKey(e.code); keys[e.code] = true; });
+addEventListener('keydown', e => {
+  if (e.target?.closest?.('button, input')) return;
+  SFX.init();
+  if (!e.repeat) onKey(e.code);
+  keys[e.code] = true;
+});
 addEventListener('keyup', e => { keys[e.code] = false; });
 cv.addEventListener('pointermove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
 cv.addEventListener('pointerdown', e => { SFX.init(); mouse.x = e.clientX; mouse.y = e.clientY; mouse.down = true; onClick(); });
@@ -50,6 +61,7 @@ const SAVE = (() => {
   try { return Object.assign(def, JSON.parse(localStorage.getItem(SAVE_KEY) || '{}')); } catch (e) { return def; }
 })();
 function recordRun(win) {
+  if (G.debugRun) return;
   const rec = [];
   SAVE.plays++;
   if (win) { SAVE.wins++; if (!SAVE.bestTime || G.t < SAVE.bestTime) { SAVE.bestTime = G.t; rec.push('time'); } }
@@ -59,6 +71,7 @@ function recordRun(win) {
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(SAVE)); } catch (e) { }
 }
 function discoverEvo(id) {
+  if (G.debugRun) return;
   if (SAVE.evos.includes(id)) return;
   SAVE.evos.push(id);
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(SAVE)); } catch (e) { }
@@ -113,13 +126,14 @@ const ETYPES = {
   bat: { hp: 6, spd: 46, dmg: 5, r: 4, xp: 1, spr: ['bat', 'bat2'], anim: .1, kbm: 1.4, cols: ['#b46cff', '#6a2fb8', '#e8403f'], wobble: true },
   skel: { hp: 42, spd: 27, dmg: 12, r: 5, xp: 3, spr: ['skel', 'skel2'], anim: .22, kbm: .6, cols: ['#f4f4f4', '#c7d4e1', '#7b8ea3'] },
   mage: { hp: 24, spd: 20, dmg: 8, r: 5, xp: 3, spr: ['mage', 'mage'], anim: .3, kbm: .8, cols: ['#e8403f', '#9b1d33', '#ffd65a'], ranged: true },
+  elite: { hp: 165, spd: 36, dmg: 15, r: 8, xp: 12, spr: ['mage', 'mage'], anim: .3, kbm: .45, cols: ['#ff8a3a', '#9b1d33', '#ffd65a'], ranged: true, elite: true },
   boss: { hp: 3200, spd: 20, dmg: 20, r: 11, xp: 0, spr: ['boss', 'boss'], anim: .4, kbm: .04, cols: ['#b46cff', '#6a2fb8', '#e8403f'], boss: true },
 };
 
 // ---------- 升级 ----------
 const UPS = [
   { id: 'chain', name: '锁链', icon: 'chain', max: 5, desc: l => l ? '可同时存在的锁链 +1，命中伤害 +20% 基础值' : '自动发射锁链，命中造成伤害；环外拉近，穿过内环则推开', apply: () => { } },
-  { id: 'chainlink', name: '铁索连环', icon: 'chainlink', max: 2, req: () => lvOf('chain') > 0, desc: l => l ? '每条锁链再增加 1 次串联（最多额外 2 次）' : '锁链命中后，飞向目标附近另一名敌人并串联拉扯', apply: () => { } },
+  { id: 'chainlink', name: '铁索连环', icon: 'chainlink', max: 3, req: () => lvOf('chain') > 0, desc: l => l ? '每条锁链再增加 1 次串联（最多额外 3 次）' : '锁链命中后，飞向目标附近另一名敌人并串联拉扯', apply: () => { } },
   { id: 'chainbind', name: '禁锢锁链', icon: 'chainbind', max: 1, req: () => lvOf('chain') > 0, desc: () => '锁链命中禁锢 3 秒，仍可被推拉；重复命中递减，10 秒未施加重置', apply: () => { } },
   { id: 'blade', name: '再添一剑', icon: 'sword', max: 6, desc: () => '环绕之剑 +1', apply: () => G.sw.n++ },
   { id: 'sharp', name: '淬火锋刃', icon: 'flame', max: 5, desc: () => '所有伤害 +30%', apply: () => G.sw.dmg *= 1.3 },
@@ -164,27 +178,102 @@ function bladeList() {
 
 // ---------- 游戏状态 ----------
 let G;
-function newGame(state = 'play') {
+let selectedDifficulty = 'normal';
+const difficultyMenu = document.getElementById('difficulty');
+const musicPicker = document.getElementById('music-picker');
+const musicMenu = document.getElementById('boss-music');
+const onlineMusic = document.getElementById('online-music');
+function newGame(state = 'play', difficulty = selectedDifficulty) {
   G = {
-    state, t: 0, real: 0, stateT: 0,
+    state, difficulty, rules: DIFFICULTIES[difficulty], t: 0, real: 0, stateT: 0,
     p: { x: 0, y: 0, vx: 0, vy: 0, hp: 100, maxHp: 100, spd: 64, inv: 0, face: 1, walk: 0, magnet: 30 },
     sw: { n: 2, r: 24, spin: 3.4, dmg: 7, size: 1, ang: 0, crit: .05, kb: 70 },
     lv: 1, xp: 0, xpNext: 6, pendingLv: 0, toLevel: -1, choices: null, cardRects: [], cardT: 0,
     enemies: [], gems: [], parts: [], nums: [], projs: [], fx: [], booms: [], chains: [], nextChainCast: 0,
     kills: 0, spawnT: 0, waveIdx: 0, up: {}, shake: 0, freeze: 0, hurtFlash: 0, flash: 0,
     dagT: 1, thT: 1, novaT: 2, cam: { x: 0, y: 0 }, banner: null,
-    eps: [], boss: null, bossIn: 0, bossDead: 0,
+    eps: [], boss: null, bossIn: 0, bossDead: 0, bossAt: BOSS_T,
+    elite: null, eliteStarted: false, eliteSupportT: 0,
     combo: 0, comboT: 0, bestCombo: 0, rerolls: 2, quakes: [], newRec: [], evoFx: 0, gemSeq: 0, gemSeqT: 0,
   };
   SFX.music(state === 'play' ? 'play' : null);
   if (state === 'play') SFX.duck(false);
+  syncStartMenu();
 }
 newGame('title');
 
+function canSelectDifficulty() {
+  return G.state === 'title' || ((G.state === 'over' || G.state === 'win') && G.stateT > .8);
+}
+function syncStartMenu() {
+  if (difficultyMenu) difficultyMenu.hidden = !canSelectDifficulty();
+  if (musicMenu) musicMenu.hidden = !canSelectDifficulty();
+}
+function startDifficulty(difficulty) {
+  if (!canSelectDifficulty()) return;
+  selectedDifficulty = difficulty;
+  newGame('play', difficulty);
+}
+for (const difficulty of Object.keys(DIFFICULTIES)) {
+  document.getElementById(difficulty)?.addEventListener('click', event => {
+    event.currentTarget.blur();
+    SFX.init();
+    startDifficulty(difficulty);
+  });
+}
+const bossTrack = document.getElementById('boss-track');
+onlineMusic?.addEventListener('click', event => {
+  event.currentTarget.blur();
+  onlineMusic.disabled = true;
+  onlineMusic.textContent = '正在连接 SoundCloud…';
+  SFX.enableOnlineBossTrack(document.getElementById('online-player'), ready => {
+    onlineMusic.disabled = ready;
+    onlineMusic.textContent = ready ? 'MEGALOVANIA 已就绪' : '连接失败 · 点击重试';
+  });
+});
+musicPicker?.addEventListener('click', event => {
+  event.currentTarget.blur();
+  bossTrack?.click();
+});
+bossTrack?.addEventListener('change', () => {
+  if (!bossTrack.files[0]) return;
+  SFX.setBossTrack(bossTrack.files[0], ready => {
+    musicPicker.textContent = ready ? 'Boss 音乐已载入' : '载入失败 · 重选 Boss 音乐';
+    if (ready && onlineMusic) { onlineMusic.disabled = false; onlineMusic.textContent = '联网播放 MEGALOVANIA'; }
+  });
+  bossTrack.value = '';
+});
+
+document.getElementById('debug-boss')?.addEventListener('click', event => {
+  // 原生按钮会保留焦点，下一次 Enter / 空格可再次触发 click。
+  event.currentTarget.blur();
+  SFX.init();
+  if (G.boss && G.state !== 'over' && G.state !== 'win') return;
+  if (G.state === 'title' || G.state === 'over' || G.state === 'win') newGame();
+  G.debugRun = true;
+  G.t = Math.max(G.t, G.bossAt);
+  G.eliteStarted = true;
+  G.elite = null;
+  G.state = 'play';
+  G.stateT = 0;
+  G.freeze = 0;
+  G.eps = [];
+  G.booms = [];
+  G.chains = [];
+  syncStartMenu();
+  mouse.down = false;
+  SFX.duck(false);
+  spawnBoss();
+});
+
 function onKey(code) {
   if (code === 'KeyM') { SFX.toggle(); return; }
-  if (G.state === 'title') { newGame('play'); return; }
-  if ((G.state === 'over' || G.state === 'win') && G.stateT > .8 && (code === 'KeyR' || code === 'Space' || code === 'Enter')) { newGame('play'); return; }
+  if (canSelectDifficulty()) {
+    if (code === 'Digit1' || code === 'Numpad1') startDifficulty('normal');
+    if (code === 'Digit2' || code === 'Numpad2') startDifficulty('hard');
+    if (code === 'KeyR' || code === 'Space' || code === 'Enter') startDifficulty(selectedDifficulty);
+    return;
+  }
   if (G.state === 'level' && G.cardT > .35) {
     const i = { Digit1: 0, Digit2: 1, Digit3: 2, Numpad1: 0, Numpad2: 1, Numpad3: 2 }[code];
     if (i !== undefined && G.choices[i]) choose(i);
@@ -195,8 +284,6 @@ function onKey(code) {
   }
 }
 function onClick() {
-  if (G.state === 'title') { newGame('play'); return; }
-  if ((G.state === 'over' || G.state === 'win') && G.stateT > .8) { newGame('play'); return; }
   if (G.state === 'pause') { G.state = 'play'; SFX.duck(false); return; }
   if (G.state === 'level' && G.cardT > .35) {
     const r = G.rerollRect;
@@ -222,7 +309,7 @@ function hurt(e, dmg, kx, ky, kb, canCrit, silent, sound) {
   if (e.dead) return;
   const crit = canCrit && Math.random() < G.sw.crit;
   if (crit) dmg *= 2.5;
-  dmg = Math.max(1, Math.round(dmg * rand(.85, 1.15)));
+  dmg = Math.max(1, Math.round(dmg * G.rules.playerDamage * rand(.85, 1.15)));
   e.hp -= dmg; e.flash = .09; e.squash = .15;
   e.kvx += kx * kb * e.type.kbm; e.kvy += ky * kb * e.type.kbm;
   if (lvOf('knock')) e.slow = .5 + lvOf('knock') * .3;
@@ -238,6 +325,12 @@ function hurt(e, dmg, kx, ky, kb, canCrit, silent, sound) {
 function kill(e, quiet) {
   e.dead = true;
   if (e.type.boss) { bossDie(e); return; }
+  if (e === G.elite) {
+    G.elite = null;
+    G.spawnT = .65;
+    G.bossAt = Math.max(G.bossAt, G.t + 12);
+    G.banner = { txt: '精英击败 · 敌潮即将恢复', life: 2, evo: true };
+  }
   if (quiet) { part(e.x, e.y, e.type.cols[0], 3, 50, .4, 1); return; }
   G.kills++;
   G.combo++; G.comboT = 2.2; G.bestCombo = Math.max(G.bestCombo, G.combo);
@@ -247,7 +340,7 @@ function kill(e, quiet) {
   part(e.x, e.y, c[0], 8, 70, .5, 2); part(e.x, e.y, c[1], 6, 50, .6, 1); part(e.x, e.y, '#ffffff', 3, 90, .2, 1);
   G.fx.push({ k: 'puff', x: e.x, y: e.y, life: .2, max: .2, r: e.type.r + 3 });
   const xp = e.type.xp;
-  const v = xp >= 3 ? (Math.random() < .15 ? 10 : 3) : (Math.random() < .04 ? 3 : 1);
+  const v = e.type.elite ? xp : xp >= 3 ? (Math.random() < .15 ? 10 : 3) : (Math.random() < .04 ? 3 : 1);
   G.gems.push({ x: e.x, y: e.y, vx: rand(-30, 30), vy: rand(-40, -10), v, mag: false, t: 0 });
   // 稀有掉落：烤鸡腿（回血）与磁石（吸取全场经验）
   const r = Math.random();
@@ -292,6 +385,7 @@ function explode(x, y) {
   shake(2.5);
 }
 function hurtPlayer(dmg) {
+  dmg = Math.max(1, Math.round(dmg));
   const p = G.p;
   p.hp -= dmg; p.inv = .7; G.hurtFlash = .35; G.freeze = .07; shake(4);
   G.combo = 0;
@@ -387,14 +481,15 @@ function choose(i) {
 
 // ---------- 生成敌人 ----------
 function spawnEnemy(type, x, y) {
-  if (G.enemies.length >= 320) return;
+  if (G.enemies.length >= 320 && type !== 'elite') return;
   const T = ETYPES[type], p = G.p;
   if (x === undefined) {
     const a = Math.random() * TAU, d = Math.hypot(W, H) / 2 + 16;
     x = p.x + Math.cos(a) * d; y = p.y + Math.sin(a) * d;
   }
   const hm = 1 + G.t * TS / 45;
-  const en = { type: T, x, y, hp: T.hp * hm, maxHp: T.hp * hm, kvx: 0, kvy: 0, cd: new Float32Array(24), flash: 0, squash: 0, slow: 0, anim: Math.random(), seed: Math.random() * 10, dead: false, shootT: rand(1.5, 3.5) };
+  const hp = T.hp * hm * (T.boss ? 1 : G.rules.mobHp);
+  const en = { type: T, x, y, hp, maxHp: hp, kvx: 0, kvy: 0, cd: new Float32Array(24), flash: 0, squash: 0, slow: 0, anim: Math.random(), seed: Math.random() * 10, dead: false, shootT: rand(1.5, 3.5) };
   G.enemies.push(en); return en;
 }
 function pickType() {
@@ -406,17 +501,37 @@ function pickType() {
 }
 function spawner(dt) {
   if (G.boss) return; // 首领战期间只靠首领自带的召唤
+  if (!G.eliteStarted && G.t >= ELITE_T) {
+    G.eliteStarted = true;
+    G.elite = spawnEnemy('elite', G.p.x, G.p.y - 104);
+    G.eliteSupportT = 2;
+    G.banner = { txt: '精英遭遇 · 追猎法师', life: 2.4, warn: true };
+    SFX.play('wave');
+  }
+  if (G.elite) {
+    while (G.waveIdx < WAVES.length && G.t >= WAVES[G.waveIdx]) G.waveIdx++;
+    G.eliteSupportT -= dt;
+    if (G.eliteSupportT <= 0) {
+      G.eliteSupportT = 4;
+      const smallCount = G.enemies.filter(e => !e.dead && e !== G.elite).length;
+      if (smallCount < 6) {
+        const a = Math.random() * TAU;
+        spawnEnemy('bat', G.p.x + Math.cos(a) * 125, G.p.y + Math.sin(a) * 125);
+      }
+    }
+    return;
+  }
+  if (G.t >= G.bossAt && !G.bossDead) { spawnBoss(); return; }
   G.spawnT -= dt;
-  const interval = Math.max(.11, .9 - G.t * TS * .0036);
+  const interval = Math.max(.11, .9 - G.t * TS * .0036) * G.rules.spawnInterval;
   while (G.spawnT <= 0) {
     G.spawnT += interval;
     const n = 1 + Math.floor(G.t * TS / 55);
     for (let i = 0; i < n; i++) spawnEnemy(pickType());
   }
   // 敌潮：环形包围
-  const waves = [32, 68, 108];
-  if (G.waveIdx < waves.length && G.t >= waves[G.waveIdx]) {
-    const type = ['bat', 'slime', 'skel'][G.waveIdx], n = 28 + G.waveIdx * 8;
+  if (G.waveIdx < WAVES.length && G.t >= WAVES[G.waveIdx]) {
+    const type = ['bat', 'slime', 'skel'][G.waveIdx], n = Math.round((28 + G.waveIdx * 8) * G.rules.waveSize);
     for (let i = 0; i < n; i++) {
       const a = i / n * TAU;
       spawnEnemy(type, G.p.x + Math.cos(a) * 150, G.p.y + Math.sin(a) * 150);
@@ -425,28 +540,29 @@ function spawner(dt) {
     SFX.play('wave');
     G.waveIdx++;
   }
-  if (G.t >= BOSS_T && !G.boss && !G.bossDead) spawnBoss();
 }
 function spawnBoss() {
   const p = G.p;
   for (const e of G.enemies) if (!e.dead) { e.hp = 0; kill(e, true); }
   G.enemies = [];
   const b = spawnEnemy('boss', p.x, p.y - 110);
-  b.hp = b.maxHp = 5000 * (1 + (G.sw.dmg - 7) / 30); b.atkT = 2.5; b.atkN = 0; b.summonT = 6; b.rage = false;
+  b.hp = b.maxHp = 5000 * (1 + (G.sw.dmg - 7) / 30) * G.rules.bossHp;
+  b.beat = SFX.bossBeatSeconds?.() ?? 60 / 156;
+  b.nextPhrase = G.t + 4 * b.beat; b.phraseIndex = 0; b.rage = false;
   G.boss = b; G.bossIn = 1.2;
-  G.banner = { txt: '深渊领主降临！', life: 2.6, warn: true };
+  G.banner = { txt: '深渊领主降临 · 紫弹只能闪避', life: 2.6, warn: true };
   G.fx.push({ k: 'ring', x: b.x, y: b.y, life: .7, max: .7, r: 120, col: '#b46cff' });
   part(b.x, b.y, '#b46cff', 30, 140, .8, 2);
   shake(7); G.flash = .3;
   SFX.play('roar'); SFX.music('boss');
 }
 // 敌方弹幕
-function enemyShot(x, y, a, spd, dmg = 8, life = 4) {
-  G.eps.push({ x, y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, dmg, life, t: 0 });
+function enemyShot(x, y, a, spd, dmg = 8, life = 4, unbreakable = false) {
+  G.eps.push({ x, y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, dmg, life, t: 0, unbreakable });
 }
 
-// 首领行为：环形弹幕 → 扇形瞄准 → 螺旋，半血狂暴并持续召唤小怪
-function bossAI(b, dt, d) {
+// 每段先预告，再按拍发射。半血缩短段间休息，保留预告时间。
+function bossAI(b) {
   if (G.bossIn > 0) return;
   const rage = b.hp < b.maxHp * .5;
   if (rage && !b.rage) {
@@ -456,35 +572,83 @@ function bossAI(b, dt, d) {
     part(b.x, b.y, '#e8403f', 30, 140, .8, 2); shake(6); G.flash = .25;
     SFX.play('roar');
   }
-  const p = G.p, aim = Math.atan2(p.y - b.y, p.x - b.x);
-  b.atkT -= dt;
-  if (b.atkT <= 0) {
-    const k = b.atkN++ % 3;
-    b.atkT = rage ? 1.7 : 2.4;
-    if (k === 0) { // 环
-      const n = rage ? 20 : 14, off = Math.random() * TAU;
-      for (let i = 0; i < n; i++) enemyShot(b.x, b.y, off + i / n * TAU, 52, 9, 5);
-    } else if (k === 1) { // 扇形瞄准
-      const n = rage ? 7 : 5;
-      for (let i = 0; i < n; i++) enemyShot(b.x, b.y, aim + (i - (n - 1) / 2) * .22, 78, 9, 4);
-    } else { // 螺旋（分帧发射）
-      b.spiral = rage ? 26 : 18; b.spiralT = 0; b.spiralA = Math.random() * TAU;
+  if (!b.phrase && G.t >= b.nextPhrase) {
+    const index = b.phraseIndex++;
+    const kind = index % 5;
+    const p = G.p;
+    const from = { x: b.x, y: b.y };
+    const aim = Math.atan2(p.y - from.y, p.x - from.x);
+    const cycle = Math.floor(index / 5);
+    const vertical = cycle % 2 === 0;
+    const lanes = [];
+    if (kind === 2) {
+      const gap = cycle % 4 < 2 ? -1 : 1;
+      const reach = Math.max(56, Math.min(112, (vertical ? H : W) * .42));
+      for (let i = -4; i <= 4; i++) {
+        if (i === gap) continue;
+        lanes.push({ x: p.x + (vertical ? i * 16 : -reach), y: p.y + (vertical ? -reach : i * 16) });
+      }
     }
-    part(b.x, b.y, '#e8403f', 8, 70, .4, 2); G.fx.push({ k: 'ring', x: b.x, y: b.y, life: .25, max: .25, r: 26, col: '#e8403f' });
-    SFX.play('shot');
+    const slowBeat = b.beat >= .49;
+    const tellBeats = slowBeat ? 1.5 : 2;
+    const tell = (tellBeats - (kind === 4 && G.difficulty === 'hard' ? .5 : 0)) * b.beat;
+    const beam = kind === 4 ? {
+      dx: Math.cos(aim), dy: Math.sin(aim),
+      radius: G.difficulty === 'hard' ? 10 : 7,
+    } : null;
+    b.phrase = { kind, from, aim, vertical, lanes, beam, tell, step: 0, at: b.nextPhrase + tell };
+    const phraseBeats = slowBeat ? (rage ? 6 : 7) : (rage ? 7 : 9);
+    b.nextPhrase += (phraseBeats + G.rules.bossBeats) * b.beat;
+    SFX.play('bossCue');
   }
-  if (b.spiral > 0 && (b.spiralT -= dt) <= 0) {
-    b.spiralT = .07; b.spiral--; b.spiralA += .5;
-    enemyShot(b.x, b.y, b.spiralA, 60, 8, 5); enemyShot(b.x, b.y, b.spiralA + Math.PI, 60, 8, 5);
-  }
-  b.summonT -= dt;
-  if (b.summonT <= 0) {
-    b.summonT = rage ? 5 : 8;
-    for (let i = 0; i < (rage ? 8 : 5); i++) {
-      const a = Math.random() * TAU; spawnEnemy(Math.random() < .5 ? 'bat' : 'slime', b.x + Math.cos(a) * 24, b.y + Math.sin(a) * 24);
+  const move = b.phrase;
+  if (!move || G.t < move.at) return;
+  const { kind, from, aim, step } = move;
+  if (move.beam) {
+    if (!move.fireUntil) {
+      move.fireUntil = G.t + .95 * b.beat;
+      SFX.play('bossLaser');
+      shake(6);
+      G.fx.push({ k: 'ring', x: from.x, y: from.y, life: .32, max: .32, r: 54, col: '#f0c9ff' });
+      part(from.x, from.y, '#e7b4ff', 18, 150, .33, 2);
     }
-    part(b.x, b.y, '#b46cff', 14, 80, .5, 2);
+    if (G.t >= move.fireUntil) { b.phrase = null; return; }
+    const p = G.p, beam = move.beam;
+    const x = p.x - from.x, y = p.y - from.y;
+    const forward = Math.max(0, x * beam.dx + y * beam.dy);
+    if (p.inv <= 0 && Math.hypot(x - forward * beam.dx, y - forward * beam.dy) < beam.radius + 3) {
+      hurtPlayer(18 * G.rules.bossDamage);
+    }
+    return;
   }
+  const rules = G.rules;
+  const fire = (angle, speed, purple = true) => enemyShot(
+    from.x + Math.cos(angle) * 18, from.y + Math.sin(angle) * 18, angle,
+    speed * rules.bossSpeed, (purple ? 10 : 7) * rules.bossDamage, 2.8, purple);
+  if (kind === 0) {
+    // 三拍扇射，预告线锁定第一拍的方向。
+    for (const offset of [-.26, 0, .26]) fire(aim + offset + step * .16, 103 + step * 8);
+  } else if (kind === 1) {
+    // 开口朝向预告区域，两圈错开半个弹位。
+    for (let i = 0; i < 16; i++) {
+      const a = (i + step * .5) * TAU / 16;
+      if (a < .58 || a > TAU - .58) continue;
+      fire(aim + a, 78 + step * 16, i % 3 !== 0);
+    }
+  } else if (kind === 2) {
+    for (const { x, y } of move.lanes) enemyShot(x, y, move.vertical ? Math.PI / 2 : 0, 132 * rules.bossSpeed, 10 * rules.bossDamage, 2.5, true);
+  } else {
+    for (let i = 0; i < 4; i++) fire(aim + step * .34 + i * TAU / 4, 88, i % 2 === 0);
+  }
+  SFX.play('bossBeat');
+  if (step === 0) {
+    shake(3);
+    part(from.x, from.y, '#c27dff', 10, 94, .28, 2);
+  }
+  G.fx.push({ k: 'ring', x: from.x, y: from.y, life: .24, max: .24, r: step === 0 ? 46 : 27, col: step === 0 ? '#e0a8ff' : '#b46cff' });
+  move.step++;
+  move.at += kind === 3 ? b.beat / 2 : b.beat;
+  if (move.step >= [3, 2, 2, 6][kind]) b.phrase = null;
 }
 function novaBlast(x, y, R, dmg, after) {
   const quake = G.up.quake;
@@ -497,7 +661,7 @@ function novaBlast(x, y, R, dmg, after) {
     hurt(e, e.type.boss ? dmg * .5 : dmg, dx / d, dy / d, after ? 120 : 200, false, true);
     if (quake && !e.type.boss) e.stun = .8;
   }
-  for (const q of G.eps) if (Math.hypot(q.x - x, q.y - y) < R) { q.dead = true; part(q.x, q.y, '#ffd65a', 3, 60, .3, 1); }
+  for (const q of G.eps) if (!q.unbreakable && Math.hypot(q.x - x, q.y - y) < R) { q.dead = true; part(q.x, q.y, '#ffd65a', 3, 60, .3, 1); }
   shake(after ? 3 : 2); G.flash = Math.max(G.flash, .05);
   SFX.play(after ? 'boom' : 'nova');
 }
@@ -679,7 +843,7 @@ function update(dt) {
     }
     // 剑刃可以格挡敌方弹幕
     for (const q of G.eps) {
-      if (q.dead) continue;
+      if (q.dead || q.unbreakable) continue;
       if (distSeg(q.x, q.y, x1, y1, x2, y2) < 3 + 2 * sw.size) {
         q.dead = true; part(q.x, q.y, '#ffd65a', 5, 70, .3, 1); part(q.x, q.y, '#ffffff', 2, 40, .2, 1);
         SFX.play('block');
@@ -730,19 +894,24 @@ function update(dt) {
     const dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy) || 1;
     let spd = e.type.spd * (e.slow > 0 ? .45 : 1);
     if (e.bindUntil > G.t) spd = 0;
-    if (e.type.boss && G.bossIn > 0) spd = 0;
+    if (e.type.boss && (G.bossIn > 0 || e.phrase)) spd = 0;
     if (e.stun > 0) { e.stun -= dt; spd = 0; }
     let dir = 1;
     if (e.type.ranged) { // 法师：保持距离并发射弹幕
-      if (d < 70) dir = -.8; else if (d < 95) dir = 0;
+      if (d < (e.type.elite ? 84 : 70)) dir = -.8;
+      else if (d < (e.type.elite ? 106 : 95)) dir = 0;
       e.shootT -= dt;
       if (e.shootT <= 0 && d < 150 && !(e.stun > 0)) {
-        e.shootT = 2.6; const a = Math.atan2(dy, dx);
-        enemyShot(e.x, e.y, a, 62, 7); part(e.x, e.y, '#e8403f', 4, 40, .3, 1);
+        e.shootT = e.type.elite ? 2.2 : 2.6;
+        const a = Math.atan2(dy, dx);
+        if (e.type.elite) {
+          for (const offset of [-.19, 0, .19]) enemyShot(e.x, e.y, a + offset, 74, 9 * G.rules.mobDamage);
+        } else enemyShot(e.x, e.y, a, 62, 7 * G.rules.mobDamage);
+        part(e.x, e.y, '#e8403f', 4, 40, .3, 1);
         SFX.play('shot');
       }
     }
-    if (e.type.boss) bossAI(e, dt, d);
+    if (e.type.boss) bossAI(e);
     let vx = dx / d * spd * dir, vy = dy / d * spd * dir;
     if (e.type.wobble && spd) { const w = Math.sin(G.t * 5 + e.seed) * 25; vx += -dy / d * w; vy += dx / d * w; }
     e.x += (vx + e.kvx) * dt; e.y += (vy + e.kvy) * dt;
@@ -757,14 +926,16 @@ function update(dt) {
         if (sd < min && sd > .01) { const push = (min - sd) * .5; e.x += sx / sd * push; e.y += sy / sd * push; }
       }
     }
-    if (d < e.type.r + 5 && p.inv <= 0 && G.state === 'play' && !(e.stun > 0)) hurtPlayer(e.type.dmg);
+    if (d < e.type.r + 5 && p.inv <= 0 && G.state === 'play' && !(e.stun > 0)) {
+      hurtPlayer(e.type.dmg * (e.type.boss ? G.rules.bossDamage : G.rules.mobDamage));
+    }
     // 远离太多则回收到玩家附近
     if (d > 400 && !e.type.boss) { const a = Math.random() * TAU, r = Math.hypot(W, H) / 2 + 16; e.x = p.x + Math.cos(a) * r; e.y = p.y + Math.sin(a) * r; }
   }
   // 敌方弹幕
   for (const q of G.eps) {
     q.x += q.vx * dt; q.y += q.vy * dt; q.life -= dt; q.t += dt;
-    if (Math.random() < .5) G.parts.push({ x: q.x, y: q.y, vx: 0, vy: 0, life: .2, max: .2, col: '#e8403f', size: 1, grav: 0 });
+    if (Math.random() < .5) G.parts.push({ x: q.x, y: q.y, vx: 0, vy: 0, life: .2, max: .2, col: q.unbreakable ? '#b46cff' : '#e8403f', size: 1, grav: 0 });
     if (!q.dead && p.inv <= 0 && Math.hypot(q.x - p.x, q.y - p.y) < 6) { q.dead = true; hurtPlayer(q.dmg); }
   }
   G.eps = G.eps.filter(q => q.life > 0 && !q.dead);
@@ -964,6 +1135,69 @@ function drawBinding(e) {
     for (const sign of [-1, 1]) { g.fillRect(x + sign * (r + 3), y - 7, 1, 3); g.fillRect(x + sign * (r + 4), y - 5, 2, 1); }
   }
 }
+function drawBossCue() {
+  const move = G.boss?.phrase;
+  if (!move || move.step) return;
+  const { kind, from, aim, at, lanes, vertical, beam } = move;
+  const charge = clamp(1 - (at - G.t) / move.tell, 0, 1);
+  g.save();
+  g.strokeStyle = '#d5a3ff';
+  g.fillStyle = '#b46cff';
+  g.globalAlpha = .22 + charge * .45;
+  if (!move.fireUntil) {
+    const r = 23 - charge * 13;
+    for (let i = 0; i < 8; i++) {
+      const angle = i * TAU / 8 + charge * 2;
+      g.fillRect(Math.round(from.x + Math.cos(angle) * r), Math.round(from.y + Math.sin(angle) * r), 2, 2);
+    }
+  }
+  if (beam) {
+    const reach = Math.hypot(G.cam.x - from.x, G.cam.y - from.y) + Math.hypot(W, H) + 32;
+    g.beginPath();
+    g.moveTo(from.x, from.y);
+    g.lineTo(from.x + beam.dx * reach, from.y + beam.dy * reach);
+    if (move.fireUntil) {
+      const burst = clamp((move.fireUntil - G.t) / .18, 0, 1);
+      g.globalAlpha = .28 + .28 * burst;
+      g.strokeStyle = '#6d29c8'; g.lineWidth = beam.radius * (2.5 + burst); g.stroke();
+      g.globalAlpha = .8;
+      g.strokeStyle = '#803acb'; g.lineWidth = beam.radius * 2; g.stroke();
+      g.globalAlpha = .95;
+      g.strokeStyle = '#c78bff'; g.lineWidth = beam.radius * 1.2; g.stroke();
+      g.strokeStyle = '#fff2ff'; g.lineWidth = 2 + 3 * burst; g.stroke();
+      g.fillStyle = '#fff2ff';
+      g.beginPath(); g.arc(from.x, from.y, 4 + 5 * burst, 0, TAU); g.fill();
+    } else {
+      g.lineWidth = beam.radius * 2; g.globalAlpha = .13 + charge * .1; g.stroke();
+      g.lineWidth = 1; g.globalAlpha = .45 + charge * .45; g.stroke();
+    }
+  } else if (kind === 2) {
+    for (const lane of lanes) {
+      const x = Math.round(lane.x), y = Math.round(lane.y);
+      g.fillRect(x - (vertical ? 3 : 0), y - (vertical ? 0 : 3), vertical ? 6 : W, vertical ? H : 6);
+    }
+  } else {
+    g.lineWidth = 1;
+    g.beginPath();
+    if (kind === 0) {
+      for (const offset of [-.26, 0, .26]) {
+        const a = aim + offset;
+        g.moveTo(from.x, from.y);
+        g.lineTo(from.x + Math.cos(a) * 180, from.y + Math.sin(a) * 180);
+      }
+    } else if (kind === 1) {
+      g.arc(from.x, from.y, 23 + charge * 7, aim + .58, aim + TAU - .58);
+    } else {
+      for (let i = 0; i < 4; i++) {
+        const a = aim + i * TAU / 4;
+        g.moveTo(from.x, from.y);
+        g.lineTo(from.x + Math.cos(a) * 65, from.y + Math.sin(a) * 65);
+      }
+    }
+    g.stroke();
+  }
+  g.restore();
+}
 function render() {
   g.imageSmoothingEnabled = false; ctx.imageSmoothingEnabled = false;
   const p = G.p, sw = G.sw;
@@ -991,6 +1225,7 @@ function render() {
   }
 
   // 实体（按 y 排序）
+  drawBossCue();
   drawChains();
   const list = G.enemies.map(e => ({ y: e.y, e }));
   if (G.state !== 'over') list.push({ y: p.y, player: true });
@@ -1008,14 +1243,20 @@ function render() {
       const fr = T.spr[Math.floor(e.anim / T.anim) % 2];
       const sq = e.squash > 0 ? 1 + e.squash * 2 : 1;
       const fly = T.wobble ? -4 + Math.sin(G.t * 8 + e.seed) * 1.5 : 0;
-      spr(fr, e.x, e.y + T.r + fly, p.x < e.x, e.flash > 0, sq, 2 - sq);
+      const scale = T.elite ? 1.5 : 1;
+      spr(fr, e.x, e.y + T.r + fly, p.x < e.x, e.flash > 0, sq * scale, (2 - sq) * scale);
+      if (T.elite) {
+        const x = Math.round(e.x), y = Math.round(e.y - 13);
+        g.fillStyle = '#ff8a3a';
+        g.fillRect(x - 1, y, 3, 1); g.fillRect(x, y - 1, 1, 3);
+      }
       if (e.stun > 0) { // 眩晕：头顶转圈的星星
         for (let k = 0; k < 2; k++) {
           const a = G.real * 8 + k * Math.PI;
           g.fillStyle = '#ffd65a'; g.fillRect(Math.round(e.x + Math.cos(a) * 4), Math.round(e.y - T.r - 6 + Math.sin(a) * 1.5), 1, 1);
         }
       }
-      if (e.hp < e.maxHp && T.hp >= 40) {
+      if (!T.elite && e.hp < e.maxHp && T.hp >= 40) {
         const hy = e.y - Math.max(12, T.r + 4);
         g.fillStyle = '#1a1423'; g.fillRect(Math.round(e.x - 6), Math.round(hy), 12, 2);
         g.fillStyle = '#e8403f'; g.fillRect(Math.round(e.x - 6), Math.round(hy), Math.round(12 * e.hp / e.maxHp), 2);
@@ -1050,7 +1291,7 @@ function render() {
   }
 
   // 敌方弹幕
-  for (const q of G.eps) spr('orb', q.x, q.y + 2);
+  for (const q of G.eps) spr(q.unbreakable ? 'orbPurple' : 'orb', q.x, q.y + (q.unbreakable ? 3 : 2));
 
   // 飞剑
   for (const pr of G.projs) {
@@ -1128,6 +1369,7 @@ function wrap(txt, maxW) {
   if (cur) lines.push(cur); return lines;
 }
 function drawOverlay() {
+  syncStartMenu();
   const CW = cv.width, CH = cv.height, p = G.p;
   // 暗角
   const vg = ctx.createRadialGradient(CW / 2, CH / 2, Math.min(CW, CH) * .35, CW / 2, CH / 2, Math.max(CW, CH) * .75);
@@ -1153,14 +1395,14 @@ function drawOverlay() {
   ctx.fillStyle = '#c4f0ff'; ctx.fillRect(S, S, fw, S);
   pxText(ctx, 'LV ' + G.lv, CW - 6 * S, bh + 3 * S, S * 2, '#ffd65a', 'r');
   // 倒计时 / 首领血条
-  if (G.boss) {
-    const b = G.boss, bw = Math.min(CW * .6, 160 * S), bx = CW / 2 - bw / 2, by = bh + 3 * S;
+  if (G.boss || G.elite) {
+    const b = G.boss || G.elite, bw = Math.min(CW * .6, 160 * S), bx = CW / 2 - bw / 2, by = bh + 3 * S;
     pixBox(bx, by, bw, 5 * S, '#2a1030', '#4a5568');
-    ctx.fillStyle = G.boss.rage ? '#ff6b5a' : '#b46cff'; ctx.fillRect(bx + S, by + S, (bw - 2 * S) * Math.max(0, b.hp / b.maxHp), 3 * S);
+    ctx.fillStyle = b.type.elite ? '#ff8a3a' : b.rage ? '#ff6b5a' : '#b46cff'; ctx.fillRect(bx + S, by + S, (bw - 2 * S) * Math.max(0, b.hp / b.maxHp), 3 * S);
     ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.fillRect(bx + S, by + S, (bw - 2 * S) * Math.max(0, b.hp / b.maxHp), S);
-    cnText('深渊领主', CW / 2, by + 10 * S, 4.5 * S, '#e8d4ff');
+    cnText(b.type.elite ? '精英 · 追猎法师' : '深渊领主', CW / 2, by + 10 * S, 4.5 * S, '#e8d4ff');
   } else if (!G.bossDead) {
-    const rem = Math.max(0, BOSS_T - G.t), mm = Math.floor(rem / 60), ss = Math.floor(rem % 60);
+    const rem = Math.max(0, G.bossAt - G.t), mm = Math.floor(rem / 60), ss = Math.floor(rem % 60);
     pxText(ctx, mm + ':' + String(ss).padStart(2, '0'), CW / 2, bh + 3 * S, S * 3, rem < 20 ? '#ff6b5a' : '#ffffff');
     cnText('距首领降临', CW / 2, bh + 13 * S, 3.5 * S, '#7b8ea3');
   }
@@ -1277,8 +1519,7 @@ function drawTitle() {
   const bob = Math.sin(G.real * 2) * 2 * S;
   cnText('剑 环', CW / 2, CH * .3 + bob, 22 * S, '#ffd65a');
   cnText('BLADE ORBIT', CW / 2, CH * .3 + 16 * S + bob, 6 * S, '#5ad1ff');
-  cnText(`v${VERSION} · 锁链之章`, CW / 2, CH * .3 + 27 * S + bob, 4 * S, '#c7d4e1');
-  if (Math.floor(G.real * 2) % 2 === 0) cnText('按任意键 / 点击 开始', CW / 2, CH * .72, 6 * S, '#ffffff');
+  cnText(`v${VERSION} · 深渊节拍`, CW / 2, CH * .3 + 27 * S + bob, 4 * S, '#c7d4e1');
   cnText('WASD / 方向键 移动（或按住鼠标）  ·  剑会自动旋转斩敌  ·  撑到首领降临并击败它', CW / 2, CH * .72 + 12 * S, 4 * S, '#7b8ea3');
   cnText('P 暂停  ·  M 静音  ·  升级时 R 重抽', CW / 2, CH * .72 + 19 * S, 4 * S, '#7b8ea3');
   // 历史记录 + 进化图鉴
@@ -1313,7 +1554,7 @@ function drawEnd() {
   }
   for (const u of UPS) { const l = lvOf(u.id); if (!l) continue; drawIcon(u.icon, ix + 6 * S, CH * .6, 9 * S); pxText(ctx, String(l), ix + 10 * S, CH * .6 + 2 * S, S, '#ffd65a', 'r'); ix += 12 * S; }
   if (!win && !EVOS.some(v => G.up[v.id])) cnText('提示：某些强化组合到一定等级后会出现「进化」', CW / 2, CH * .67, 4 * S, '#7b8ea3');
-  if (G.stateT > .8 && Math.floor(G.real * 2) % 2 === 0) cnText('按 R / 点击 再来一局', CW / 2, CH * .76, 6 * S, '#c7d4e1');
+  if (G.stateT > .8) cnText('按 R 重开当前难度', CW / 2, CH * .78, 5 * S, '#c7d4e1');
 }
 
 // ---------- 主循环 ----------

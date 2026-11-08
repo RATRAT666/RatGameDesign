@@ -178,6 +178,7 @@ const SPR_SRC = {
     '...kkkkk....kkkkk...',
   ],
   orb: ['.kk.', 'kyrk', 'krRk', '.kk.'],
+  orbPurple: ['..kk..', '.kVvk.', 'kVvavk', 'kvavVk', '.kvVk.', '..kk..'],
   ring: ['..kkkk..', '.kcCCck.', 'kcn..nck', 'kC....Ck', 'kC....Ck', 'kcn..nck', '.kcCCck.', '..kkkk..'],
   nova: ['...kk...', 'k.kcck.k', '.kcwwck.', 'kcwwwwck', 'kcwwwwck', '.kcwwck.', 'k.kcck.k', '...kk...'],
   gem: ['.k.', 'kck', 'kCk', '.k.'],

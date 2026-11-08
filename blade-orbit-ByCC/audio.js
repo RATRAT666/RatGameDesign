@@ -90,6 +90,9 @@ const SFX = (() => {
       noise(.16, .035, 1800, 380, 0, 'bandpass'); metal(440, .07, .035, .015);
     }],
     bindOff: [.16, () => { tone('sine', 260, 620, .16, .035); noise(.12, .025, 800, 2400, 0, 'bandpass'); }],
+    bossCue: [.1, () => { tone('triangle', 310, 490, .16, .055); tone('sine', 730, 960, .22, .035, .08); }],
+    bossBeat: [.09, () => { tone('triangle', 235, 95, .11, .065); noise(.06, .055, 2800, 900, 0, 'bandpass'); }],
+    bossLaser: [.15, () => { tone('sawtooth', 450, 120, .28, .09); noise(.22, .09, 3200, 620, 0, 'bandpass'); }],
     shot: [.07, () => { tone('square', 520, 260, .08, .035); }],
     wave: [.5, () => { for (const at of [0, .6]) { tone('sawtooth', 220, 220, .5, .08, at); tone('sawtooth', 233, 233, .5, .08, at); } }],
     roar: [.5, () => { tone('sawtooth', 95, 38, 1.2, .2); tone('square', 60, 30, 1.2, .1); noise(1.1, .3, 900, 80); }],
@@ -111,36 +114,167 @@ const SFX = (() => {
   // ---- 背景音乐：小调琶音循环，首领战换成更快更暗的进行 ----
   const SONGS = {
     play: { bpm: 126, ch: [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]] }, // Am F C G
-    boss: { bpm: 152, ch: [[57, 60, 64], [58, 62, 65], [52, 56, 59], [57, 60, 64]] }, // Am Bb E Am
+    boss: { bpm: 156, ch: [[45, 48, 52], [41, 45, 48], [43, 47, 50], [40, 44, 47]] },
   };
+  const BOSS_RIFF = [0, -1, 0, 12, 7, -1, 3, -1, 0, 7, -1, 10, 12, -1, 7, -1];
+  function bossMusicStep(s, ch, sd, at) {
+    if ([0, 3, 6, 8, 11, 14].includes(s)) tone('sine', 155, 43, .15, .29, at, mus);
+    if (s === 4 || s === 12) {
+      noise(.13, .15, 4200, 1100, at, 'bandpass', mus);
+      tone('triangle', 220, 115, .08, .07, at, mus);
+    }
+    if (s % 2 === 0 || s >= 14) noise(s % 4 === 2 ? .07 : .025, .038, 9600, 6500, at, 'highpass', mus);
+    if (BOSS_RIFF[s] >= 0) {
+      const f = n2f(ch[0] + BOSS_RIFF[s]);
+      tone('square', f, f, sd * .86, .055, at, mus);
+      tone('triangle', f / 2, f / 2, sd * 1.5, .078, at, mus);
+    }
+    if (s === 2 || s === 10) for (const n of ch) {
+      tone('triangle', n2f(n + 24), n2f(n + 24), sd * 1.2, .03, at, mus);
+    }
+  }
   let song = null, step = 0, nextT = 0;
+  let bossTrack = null, trackReady = false, trackPlaying = false, ducked = false;
+  let online = null;
+  function clearOnline() {
+    if (!online) return;
+    const session = online;
+    online = null;
+    clearTimeout(session.timeout);
+    session.widget?.pause();
+    session.frame.parentElement.hidden = true;
+    session.frame.removeAttribute('src');
+  }
+  function enableOnlineBossTrack(frame, onReady) {
+    clearOnline();
+    const session = { frame, ready: false, playing: false, active: false };
+    online = session;
+    const fail = () => {
+      if (online !== session) return;
+      clearOnline();
+      onReady(false);
+    };
+    session.timeout = setTimeout(fail, 10000);
+    const connect = () => {
+      if (online !== session) return;
+      const api = window.SC?.Widget;
+      if (!api) { fail(); return; }
+      const track = 'https://soundcloud.com/tobyfox-music/megalovania';
+      frame.src = 'https://w.soundcloud.com/player/?url=' + encodeURIComponent(track) + '&auto_play=false&show_artwork=false&visual=false';
+      const widget = session.widget = api(frame);
+      const events = api.Events;
+      widget.bind(events.READY, () => {
+        if (online !== session) return;
+        clearTimeout(session.timeout);
+        session.ready = true;
+        onReady(true);
+      });
+      widget.bind(events.PLAY, () => {
+        if (online !== session || !session.active) { widget.pause(); return; }
+        session.playing = true;
+      });
+      widget.bind(events.PAUSE, () => { session.playing = false; });
+      widget.bind(events.FINISH, () => {
+        session.playing = false;
+        if (online === session && session.active) { widget.seekTo(0); widget.play(); }
+      });
+      widget.bind(events.ERROR, fail);
+    };
+    if (window.SC?.Widget) connect();
+    else {
+      const script = document.createElement('script');
+      script.src = 'https://w.soundcloud.com/player/api.js';
+      script.onload = connect;
+      script.onerror = fail;
+      document.head.appendChild(script);
+    }
+  }
+  function setBossTrack(file, onReady) {
+    clearOnline();
+    if (bossTrack) {
+      bossTrack.pause();
+      URL.revokeObjectURL(bossTrack.src);
+    }
+    trackReady = false;
+    trackPlaying = false;
+    const track = new Audio(URL.createObjectURL(file));
+    bossTrack = track;
+    track.loop = true;
+    track.muted = muted;
+    track.volume = ducked ? .12 : .48;
+    track.addEventListener('canplay', () => {
+      if (bossTrack !== track) return;
+      trackReady = true;
+      onReady(true);
+    }, { once: true });
+    track.addEventListener('error', () => {
+      if (bossTrack !== track) return;
+      trackReady = false;
+      trackPlaying = false;
+      onReady(false);
+    });
+  }
+  function bossBeatSeconds() { return 60 / (trackReady || online?.ready ? 120 : SONGS.boss.bpm); }
   function music(name) {
     const s = name ? SONGS[name] : null;
     if (s === song) return;
     song = s; step = 0;
     if (ac) nextT = ac.currentTime + .1;
+    if (online?.ready) {
+      online.active = s === SONGS.boss;
+      online.frame.parentElement.hidden = !online.active;
+      online.playing = false;
+      if (online.active) {
+        online.widget.setVolume(muted ? 0 : ducked ? 20 : 65);
+        online.widget.seekTo(0);
+        online.widget.play();
+      } else online.widget.pause();
+    }
+    if (bossTrack) {
+      bossTrack.pause();
+      trackPlaying = false;
+      if (s === SONGS.boss && trackReady && !online?.active) {
+        const track = bossTrack;
+        track.currentTime = 0;
+        trackPlaying = true;
+        track.play().catch(() => {
+          if (bossTrack === track && song === SONGS.boss) trackPlaying = false;
+        });
+      }
+    }
   }
   function schedule() {
-    if (!song || muted) return;
+    if (!song || muted || trackPlaying || online?.playing) return;
     const sd = 60 / song.bpm / 4, now = ac.currentTime, boss = song === SONGS.boss;
     if (nextT < now - .05) nextT = now + .05; // 标签页切回后跳过积压的拍子
     while (nextT < now + .15) {
       const at = nextT - now, s = step % 16, ch = song.ch[(step >> 4) % 4];
+      if (boss) {
+        bossMusicStep(s, ch, sd, at);
+        step++; nextT += sd;
+        continue;
+      }
       if (s % 2 === 0) tone('square', n2f(ch[0] - 24), n2f(ch[0] - 24), sd * 1.6, .05, at, mus); // 低音
       const n = ch[[0, 1, 2, 1][s % 4]] + (s >= 8 ? 12 : 0);
       tone('triangle', n2f(n), n2f(n), sd * .9, .07, at, mus);                                   // 琶音
       if (s % 8 === 0) tone('sine', 150, 42, .14, .3, at, mus);                                  // 底鼓
       if (s % 4 === 2) noise(.03, .05, 9000, 7000, at, 'highpass', mus);                         // 踩镲
-      if (boss && s % 8 === 4) noise(.12, .14, 3500, 900, at, 'bandpass', mus);                  // 军鼓
       step++; nextT += sd;
     }
   }
 
-  function duck(on) { if (ac) mus.gain.setTargetAtTime(on ? .25 : 1, ac.currentTime, .08); }
+  function duck(on) {
+    ducked = on;
+    if (ac) mus.gain.setTargetAtTime(on ? .25 : 1, ac.currentTime, .08);
+    if (bossTrack) bossTrack.volume = on ? .12 : .48;
+    if (online?.active) online.widget.setVolume(muted ? 0 : on ? 20 : 65);
+  }
   function toggle() {
     muted = !muted;
+    if (bossTrack) bossTrack.muted = muted;
+    if (online?.active) online.widget.setVolume(muted ? 0 : ducked ? 20 : 65);
     try { localStorage.setItem('bladeOrbit.muted', muted ? '1' : '0'); } catch (e) { }
     if (ac) master.gain.setTargetAtTime(muted ? 0 : VOL, ac.currentTime, .03);
   }
-  return { init, play, music, duck, toggle, get muted() { return muted; } };
+  return { init, play, music, duck, toggle, setBossTrack, enableOnlineBossTrack, bossBeatSeconds, get muted() { return muted; } };
 })();

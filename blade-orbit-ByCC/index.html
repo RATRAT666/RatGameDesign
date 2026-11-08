@@ -3,14 +3,36 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>剑环 · Blade Orbit v0.4.4</title>
+<title>剑环 · Blade Orbit v0.4.10</title>
 <style>
 html,body{margin:0;height:100%;background:#0d0e14;overflow:hidden;user-select:none}
 canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges}
+#debug-boss{position:fixed;right:12px;bottom:32px;padding:6px 10px;border:1px solid #7852a8;background:#21172f;color:#e8d4ff;font:inherit;cursor:pointer}
+#difficulty{position:fixed;left:50%;top:70%;transform:translate(-50%,-50%);white-space:nowrap}
+#difficulty button,#boss-music button{padding:7px 12px;border:1px solid #7852a8;background:#21172f;color:#e8d4ff;font:inherit;cursor:pointer}
+#boss-music{position:fixed;right:12px;top:32px;text-align:right}
+#online-panel{position:fixed;right:12px;bottom:76px;width:min(300px,calc(100vw - 24px));background:#21172f;text-align:right}
+#online-player{display:block;width:100%;height:86px;border:0}
+#online-panel a,#boss-music a{color:#e8d4ff;font-size:12px}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="difficulty" aria-label="选择难度">
+  <button id="normal" type="button">1 · 中等</button>
+  <button id="hard" type="button">2 · 困难</button>
+</div>
+<div id="boss-music">
+  <button id="online-music" type="button">联网播放 MEGALOVANIA</button>
+  <button id="music-picker" type="button">本地音频</button>
+  <a href="https://soundcloud.com/tobyfox-music/megalovania" target="_blank" rel="noopener noreferrer">打开原曲</a>
+</div>
+<div id="online-panel" hidden>
+  <iframe id="online-player" title="MEGALOVANIA · SoundCloud" allow="autoplay"></iframe>
+  <a href="https://soundcloud.com/tobyfox-music/megalovania" target="_blank" rel="noopener noreferrer">播放器没声音？打开原曲</a>
+</div>
+<input id="boss-track" type="file" accept="audio/*,.mp3,.ogg,.wav" hidden>
+<button id="debug-boss" type="button">调试：跳到 Boss</button>
 <script src="sprites.js"></script>
 <script src="audio.js"></script>
 <script src="game.js"></script>

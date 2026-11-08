@@ -28,7 +28,8 @@ function loadGame() {
   const filename = path.join(root, 'game.js');
   const source = fs.readFileSync(filename, 'utf8') + `\n;globalThis.__gameTest = {
     audioEvents, get G(){return G}, set G(v){G=v}, UPS, EVOS, RARITY, ETYPES, rollChoices, openLevel, choose,
-    spawnEnemy, update, hurt, bladeList, newGame, CHAIN, updateChains, chainTarget, chainOccupied, retractChain, bindEnemy, chainPull, get keys(){return keys}, get listeners(){return listeners},
+    spawnEnemy, spawner, update, hurt, bladeList, newGame, CHAIN, updateChains, chainTarget, chainOccupied, retractChain, bindEnemy, chainPull, get keys(){return keys}, get listeners(){return listeners},
+    spawnBoss, bossAI, enemyShot, novaBlast,
     get S(){return S}, get W(){return W}, get H(){return H}
   };`;
   vm.runInNewContext(source, sandbox, { filename });
