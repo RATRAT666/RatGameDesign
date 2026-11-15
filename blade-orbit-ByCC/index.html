@@ -3,11 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>剑环 · Blade Orbit v0.4.10</title>
+<title>剑环 · Blade Orbit v0.4.12</title>
 <style>
 html,body{margin:0;height:100%;background:#0d0e14;overflow:hidden;user-select:none}
 canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges}
-#debug-boss{position:fixed;right:12px;bottom:32px;padding:6px 10px;border:1px solid #7852a8;background:#21172f;color:#e8d4ff;font:inherit;cursor:pointer}
+#debug-boss,#debug-level{position:fixed;right:12px;bottom:32px;padding:6px 10px;border:1px solid #7852a8;background:#21172f;color:#e8d4ff;font:inherit;cursor:pointer}
+#debug-level{bottom:68px}
 #difficulty{position:fixed;left:50%;top:70%;transform:translate(-50%,-50%);white-space:nowrap}
 #difficulty button,#boss-music button{padding:7px 12px;border:1px solid #7852a8;background:#21172f;color:#e8d4ff;font:inherit;cursor:pointer}
 #boss-music{position:fixed;right:12px;top:32px;text-align:right}
@@ -32,6 +33,7 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges}
   <a href="https://soundcloud.com/tobyfox-music/megalovania" target="_blank" rel="noopener noreferrer">播放器没声音？打开原曲</a>
 </div>
 <input id="boss-track" type="file" accept="audio/*,.mp3,.ogg,.wav" hidden>
+<button id="debug-level" type="button">调试：强行升级</button>
 <button id="debug-boss" type="button">调试：跳到 Boss</button>
 <script src="sprites.js"></script>
 <script src="audio.js"></script>

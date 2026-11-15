@@ -1,6 +1,6 @@
 'use strict';
 // ================== 剑环 · Blade Orbit v0.4.6：深渊节拍 ==================
-const VERSION = '0.4.10';
+const VERSION = '0.4.12';
 const DIFFICULTIES = {
   normal: { playerDamage: .8, mobHp: .90, mobDamage: .92, spawnInterval: 1.10, waveSize: .90, bossHp: 1, bossSpeed: 1, bossDamage: 1, bossBeats: 0 },
   hard: { playerDamage: 1, mobHp: 1, mobDamage: 1, spawnInterval: 1, waveSize: 1, bossHp: 1.15, bossSpeed: 1.15, bossDamage: 1.2, bossBeats: -1 },
@@ -37,6 +37,7 @@ function distSeg(px, py, x1, y1, x2, y2) {
 // ---------- 输入 ----------
 const keys = {};
 const mouse = { x: 0, y: 0, down: false };
+const DASH = { duration: .18, cooldown: 1.2, speed: 240 };
 addEventListener('keydown', e => {
   if (e.target?.closest?.('button, input')) return;
   SFX.init();
@@ -45,8 +46,14 @@ addEventListener('keydown', e => {
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
 cv.addEventListener('pointermove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
-cv.addEventListener('pointerdown', e => { SFX.init(); mouse.x = e.clientX; mouse.y = e.clientY; mouse.down = true; onClick(); });
-addEventListener('pointerup', () => { mouse.down = false; });
+cv.addEventListener('pointerdown', e => {
+  SFX.init(); mouse.x = e.clientX; mouse.y = e.clientY;
+  if (e.button === 2) { startDash(true); return; }
+  if (e.button !== 0) return;
+  mouse.down = true; onClick();
+});
+cv.addEventListener('contextmenu', e => e.preventDefault());
+addEventListener('pointerup', e => { if (e.button === 0) mouse.down = false; });
 // 切走窗口时自动暂停，并清空按键（避免回来时角色自己跑）
 addEventListener('blur', () => {
   for (const k in keys) keys[k] = false;
@@ -186,7 +193,7 @@ const onlineMusic = document.getElementById('online-music');
 function newGame(state = 'play', difficulty = selectedDifficulty) {
   G = {
     state, difficulty, rules: DIFFICULTIES[difficulty], t: 0, real: 0, stateT: 0,
-    p: { x: 0, y: 0, vx: 0, vy: 0, hp: 100, maxHp: 100, spd: 64, inv: 0, face: 1, walk: 0, magnet: 30 },
+    p: { x: 0, y: 0, vx: 0, vy: 0, hp: 100, maxHp: 100, spd: 64, inv: 0, face: 1, walk: 0, magnet: 30, dashT: 0, dashCd: 0, dashX: 0, dashY: 0 },
     sw: { n: 2, r: 24, spin: 3.4, dmg: 7, size: 1, ang: 0, crit: .05, kb: 70 },
     lv: 1, xp: 0, xpNext: 6, pendingLv: 0, toLevel: -1, choices: null, cardRects: [], cardT: 0,
     enemies: [], gems: [], parts: [], nums: [], projs: [], fx: [], booms: [], chains: [], nextChainCast: 0,
@@ -244,6 +251,13 @@ bossTrack?.addEventListener('change', () => {
   bossTrack.value = '';
 });
 
+document.getElementById('debug-level')?.addEventListener('click', event => {
+  event.currentTarget.blur();
+  if (G.state !== 'play') return;
+  G.debugRun = true;
+  gainXp(G.xpNext);
+});
+
 document.getElementById('debug-boss')?.addEventListener('click', event => {
   // 原生按钮会保留焦点，下一次 Enter / 空格可再次触发 click。
   event.currentTarget.blur();
@@ -266,7 +280,23 @@ document.getElementById('debug-boss')?.addEventListener('click', event => {
   spawnBoss();
 });
 
+function startDash(towardPointer = false) {
+  if (G.state !== 'play' || G.freeze > 0 || G.p.dashCd > 0) return;
+  const p = G.p;
+  let dx = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
+  let dy = (keys.KeyS || keys.ArrowDown ? 1 : 0) - (keys.KeyW || keys.ArrowUp ? 1 : 0);
+  if (towardPointer || (!dx && !dy && mouse.down)) {
+    dx = mouse.x / S - W / 2 + G.cam.x - p.x;
+    dy = mouse.y / S - H / 2 + G.cam.y - p.y;
+  }
+  const len = Math.hypot(dx, dy);
+  p.dashX = len > .001 ? dx / len : p.face; p.dashY = len > .001 ? dy / len : 0;
+  p.dashT = DASH.duration; p.dashCd = DASH.cooldown;
+  p.inv = Math.max(p.inv, DASH.duration + .04);
+  part(p.x, p.y, '#a9eaff', 8, 70, .3, 1);
+}
 function onKey(code) {
+  if (code === 'ShiftLeft' || code === 'ShiftRight') { startDash(); return; }
   if (code === 'KeyM') { SFX.toggle(); return; }
   if (canSelectDifficulty()) {
     if (code === 'Digit1' || code === 'Numpad1') startDifficulty('normal');
@@ -815,12 +845,22 @@ function update(dt) {
     if (Math.hypot(wx, wy) > 4) { mx = wx; my = wy; }
   }
   const ml = Math.hypot(mx, my);
-  const tvx = ml ? mx / ml * p.spd : 0, tvy = ml ? my / ml * p.spd : 0;
-  const k = Math.min(1, dt * 14);
-  p.vx += (tvx - p.vx) * k; p.vy += (tvy - p.vy) * k;
-  p.x += p.vx * dt; p.y += p.vy * dt;
-  if (Math.abs(mx) > .1) p.face = Math.sign(mx);
-  p.walk = ml ? p.walk + dt : 0;
+  p.dashCd = Math.max(0, p.dashCd - dt);
+  if (p.dashT > 0) {
+    const dashStep = Math.min(dt, p.dashT);
+    p.x += p.dashX * DASH.speed * dashStep; p.y += p.dashY * DASH.speed * dashStep;
+    p.dashT = Math.max(0, p.dashT - dt);
+    p.vx = p.dashX * p.spd; p.vy = p.dashY * p.spd;
+    if (p.dashX) p.face = Math.sign(p.dashX);
+    if (Math.random() < .7) part(p.x, p.y + 3, '#a9eaff', 1, 20, .24, 1);
+  } else {
+    const tvx = ml ? mx / ml * p.spd : 0, tvy = ml ? my / ml * p.spd : 0;
+    const k = Math.min(1, dt * 14);
+    p.vx += (tvx - p.vx) * k; p.vy += (tvy - p.vy) * k;
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    if (Math.abs(mx) > .1) p.face = Math.sign(mx);
+  }
+  p.walk = ml || p.dashT > 0 ? p.walk + dt : 0;
   p.inv -= dt;
   G.cam.x += (p.x - G.cam.x) * Math.min(1, dt * 7);
   G.cam.y += (p.y - G.cam.y) * Math.min(1, dt * 7);
@@ -1406,6 +1446,7 @@ function drawOverlay() {
     pxText(ctx, mm + ':' + String(ss).padStart(2, '0'), CW / 2, bh + 3 * S, S * 3, rem < 20 ? '#ff6b5a' : '#ffffff');
     cnText('距首领降临', CW / 2, bh + 13 * S, 3.5 * S, '#7b8ea3');
   }
+  cnText(p.dashCd > 0 ? `冲刺 ${p.dashCd.toFixed(1)}s` : '冲刺 就绪', 6 * S, bh + 20 * S, 3.5 * S, p.dashCd > 0 ? '#7b8ea3' : '#5ad1ff', 'left');
   // 击杀
   drawIcon('skull', 10 * S, bh + 7 * S, 7 * S);
   pxText(ctx, String(G.kills), 16 * S, bh + 4 * S, S * 2, '#ffffff', 'l');
@@ -1521,7 +1562,7 @@ function drawTitle() {
   cnText('BLADE ORBIT', CW / 2, CH * .3 + 16 * S + bob, 6 * S, '#5ad1ff');
   cnText(`v${VERSION} · 深渊节拍`, CW / 2, CH * .3 + 27 * S + bob, 4 * S, '#c7d4e1');
   cnText('WASD / 方向键 移动（或按住鼠标）  ·  剑会自动旋转斩敌  ·  撑到首领降临并击败它', CW / 2, CH * .72 + 12 * S, 4 * S, '#7b8ea3');
-  cnText('P 暂停  ·  M 静音  ·  升级时 R 重抽', CW / 2, CH * .72 + 19 * S, 4 * S, '#7b8ea3');
+  cnText('Shift / 鼠标右键 冲刺  ·  P 暂停  ·  M 静音  ·  升级时 R 重抽', CW / 2, CH * .72 + 19 * S, 4 * S, '#7b8ea3');
   // 历史记录 + 进化图鉴
   if (SAVE.plays) {
     const best = `通关 ${SAVE.wins} / ${SAVE.plays} 局    最快通关 ${SAVE.bestTime ? fmtTime(SAVE.bestTime) : '--'}    最多击杀 ${SAVE.bestKills}    最高等级 ${SAVE.bestLv}`;
